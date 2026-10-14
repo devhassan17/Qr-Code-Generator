@@ -9,7 +9,7 @@ export async function GET(
   { params }: { params: { slug: string } }
 ) {
   const slug = params.slug;
-  const qrItem = Storage.getQRCodeBySlug(slug);
+  const qrItem = await Storage.getQRCodeBySlug(slug);
 
   if (!qrItem) {
     return new NextResponse(
@@ -71,7 +71,7 @@ export async function GET(
 
   // Record scan in storage
   try {
-    Storage.recordScan({
+    await Storage.recordScan({
       qrCodeId: qrItem.id,
       slug: qrItem.slug,
       deviceType,

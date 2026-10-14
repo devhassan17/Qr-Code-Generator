@@ -4,7 +4,7 @@ import { Storage } from '@/lib/storage';
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  const qrCodes = Storage.getAllQRCodes();
+  const qrCodes = await Storage.getAllQRCodes();
   return NextResponse.json({ qrCodes });
 }
 
@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
       .replace(/[^a-z0-9-_]/g, '-');
 
     // Check duplicate slug
-    const existing = Storage.getQRCodeBySlug(cleanSlug);
+    const existing = await Storage.getQRCodeBySlug(cleanSlug);
     if (existing) {
       return NextResponse.json(
         { error: `The short slug "${cleanSlug}" is already in use. Please pick another.` },
@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const created = Storage.createQRCode({
+    const created = await Storage.createQRCode({
       title: title.trim(),
       slug: cleanSlug,
       destinationUrl: destinationUrl.trim(),

@@ -8,12 +8,12 @@ export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const qrItem = Storage.getQRCodeById(params.id);
+  const qrItem = await Storage.getQRCodeById(params.id);
   if (!qrItem) {
     return NextResponse.json({ error: 'QR Code not found' }, { status: 404 });
   }
 
-  const scans = Storage.getScansForQRCode(params.id);
+  const scans = await Storage.getScansForQRCode(params.id);
 
   // Calculate metrics
   const now = new Date();
@@ -82,7 +82,7 @@ export async function PUT(
 ) {
   try {
     const body = await request.json();
-    const updated = Storage.updateQRCode(params.id, body);
+    const updated = await Storage.updateQRCode(params.id, body);
     if (!updated) {
       return NextResponse.json({ error: 'QR Code not found' }, { status: 404 });
     }
@@ -96,9 +96,9 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const success = Storage.deleteQRCode(params.id);
+  const success = await Storage.deleteQRCode(params.id);
   if (!success) {
     return NextResponse.json({ error: 'QR Code not found' }, { status: 404 });
   }
-  return NextResponse.json({ success: true, message: 'QR Code deleted successfully' });
+  return NextResponse.json({ success: true, message: 'QR Code archived safely' });
 }

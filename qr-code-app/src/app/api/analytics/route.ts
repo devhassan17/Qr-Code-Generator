@@ -4,8 +4,8 @@ import { Storage } from '@/lib/storage';
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  const qrCodes = Storage.getAllQRCodes();
-  const scans = Storage.getAllScans();
+  const qrCodes = await Storage.getAllQRCodes();
+  const scans = await Storage.getAllScans();
 
   const totalScans = scans.length;
   const activeQRs = qrCodes.filter(q => q.isActive).length;

@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { Redis } from '@upstash/redis';
 import { QRCodeItem, ScanEvent } from './types';
 
 interface DatabaseSchema {
@@ -7,17 +8,19 @@ interface DatabaseSchema {
   scans: ScanEvent[];
 }
 
-// Global cache in memory for serverless execution
+// Global cache in memory for speed
 const globalForDb = globalThis as unknown as {
   __qrDbCache?: DatabaseSchema;
 };
 
-// Check for Vercel KV / Upstash Redis credentials
+// Check for Vercel KV / Upstash Redis environment variables
 const redisUrl = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
 const redisToken = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
 
-// Determine storage path (falls back to /tmp if read-only filesystem on Vercel)
-function getStoragePath(): string {
+const redis = redisUrl && redisToken ? new Redis({ url: redisUrl, token: redisToken }) : null;
+const REDIS_DB_KEY = 'qr_hub_database_v1';
+
+function getLocalStoragePath(): string {
   try {
     const localDir = path.join(process.cwd(), 'data');
     if (!fs.existsSync(localDir)) {
@@ -45,7 +48,7 @@ function getInitialSeed(): DatabaseSchema {
       notes: 'Printed on sales rep business cards and table tents',
       colorDark: '#0f172a',
       colorLight: '#ffffff',
-      totalScans: 42
+      totalScans: 42,
     },
     {
       id: 'qr_main_site',
@@ -58,8 +61,8 @@ function getInitialSeed(): DatabaseSchema {
       notes: 'General marketing banner QR',
       colorDark: '#047857',
       colorLight: '#ffffff',
-      totalScans: 19
-    }
+      totalScans: 19,
+    },
   ];
 
   const initialScans: ScanEvent[] = [];
@@ -81,7 +84,7 @@ function getInitialSeed(): DatabaseSchema {
       country: 'US',
       city: cities[i % cities.length],
       referer: 'Direct / Camera Scan',
-      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)'
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)',
     });
   }
 
@@ -98,90 +101,110 @@ function getInitialSeed(): DatabaseSchema {
       country: 'US',
       city: cities[i % cities.length],
       referer: 'Flyer Scan',
-      userAgent: 'Mozilla/5.0 (Linux; Android 14)'
+      userAgent: 'Mozilla/5.0 (Linux; Android 14)',
     });
   }
 
   return { qrCodes: initialQRs, scans: initialScans };
 }
 
-function loadDatabase(): DatabaseSchema {
+/**
+ * Load Database:
+ * 1. Reads from Cloud Database (Upstash Redis / Vercel KV) if connected.
+ * 2. Falls back to local persistent disk file if offline/local dev.
+ */
+async function loadDatabase(): Promise<DatabaseSchema> {
+  // If Cloud Database is connected, fetch live data
+  if (redis) {
+    try {
+      const cloudData = await redis.get<DatabaseSchema>(REDIS_DB_KEY);
+      if (cloudData && Array.isArray(cloudData.qrCodes) && Array.isArray(cloudData.scans)) {
+        globalForDb.__qrDbCache = cloudData;
+        return cloudData;
+      } else {
+        // Initialize cloud database with initial seed
+        const seed = getInitialSeed();
+        await redis.set(REDIS_DB_KEY, seed);
+        globalForDb.__qrDbCache = seed;
+        return seed;
+      }
+    } catch (err) {
+      console.warn('Error reading from Cloud Redis, falling back to local:', err);
+    }
+  }
+
+  // Local filesystem fallback
   if (globalForDb.__qrDbCache) {
     return globalForDb.__qrDbCache;
   }
 
-  const filePath = getStoragePath();
+  const filePath = getLocalStoragePath();
   try {
     if (fs.existsSync(filePath)) {
       const content = fs.readFileSync(filePath, 'utf-8');
       const parsed = JSON.parse(content);
       if (parsed && Array.isArray(parsed.qrCodes) && Array.isArray(parsed.scans)) {
-        // Guarantee seed QRs are preserved if not present
-        const seed = getInitialSeed();
-        const existingIds = new Set(parsed.qrCodes.map((q: QRCodeItem) => q.id));
-        seed.qrCodes.forEach(seedQR => {
-          if (!existingIds.has(seedQR.id)) {
-            parsed.qrCodes.push(seedQR);
-          }
-        });
-
         globalForDb.__qrDbCache = parsed;
         return parsed;
       }
     }
   } catch (err) {
-    console.warn('Failed to read db file, initializing seed:', err);
+    console.warn('Local read error:', err);
   }
 
   const seed = getInitialSeed();
-  saveDatabase(seed);
+  await saveDatabase(seed);
   return seed;
 }
 
-function saveDatabase(data: DatabaseSchema): void {
+/**
+ * Save Database:
+ * 1. Saves to Cloud Database (Upstash Redis / Vercel KV) permanently.
+ * 2. Updates local cache and disk.
+ */
+async function saveDatabase(data: DatabaseSchema): Promise<void> {
   globalForDb.__qrDbCache = data;
-  const filePath = getStoragePath();
-  try {
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
-  } catch (err) {
-    console.warn('Failed to write db file to disk:', err);
+
+  // Save to Cloud Database
+  if (redis) {
+    try {
+      await redis.set(REDIS_DB_KEY, data);
+    } catch (err) {
+      console.error('Error writing to Cloud Redis:', err);
+    }
   }
 
-  // Asynchronous sync to cloud Redis if configured
-  if (redisUrl && redisToken) {
-    try {
-      fetch(`${redisUrl}/set/qr_database_master`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${redisToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data),
-      }).catch((e) => console.warn('Redis sync error:', e));
-    } catch {
-      // ignore async sync errors
-    }
+  // Save to local disk
+  try {
+    const filePath = getLocalStoragePath();
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+  } catch (err) {
+    // ignore local disk write errors on serverless
   }
 }
 
 export const Storage = {
-  getAllQRCodes(): QRCodeItem[] {
-    const db = loadDatabase();
+  async isUsingCloudDatabase(): Promise<boolean> {
+    return redis !== null;
+  },
+
+  async getAllQRCodes(): Promise<QRCodeItem[]> {
+    const db = await loadDatabase();
     return db.qrCodes;
   },
 
-  getQRCodeBySlug(slug: string): QRCodeItem | undefined {
-    const db = loadDatabase();
+  async getQRCodeBySlug(slug: string): Promise<QRCodeItem | undefined> {
+    const db = await loadDatabase();
     return db.qrCodes.find((item) => item.slug.toLowerCase() === slug.toLowerCase());
   },
 
-  getQRCodeById(id: string): QRCodeItem | undefined {
-    const db = loadDatabase();
+  async getQRCodeById(id: string): Promise<QRCodeItem | undefined> {
+    const db = await loadDatabase();
     return db.qrCodes.find((item) => item.id === id);
   },
 
-  createQRCode(data: Omit<QRCodeItem, 'id' | 'createdAt' | 'updatedAt' | 'totalScans'>): QRCodeItem {
-    const db = loadDatabase();
+  async createQRCode(data: Omit<QRCodeItem, 'id' | 'createdAt' | 'updatedAt' | 'totalScans'>): Promise<QRCodeItem> {
+    const db = await loadDatabase();
     const now = new Date().toISOString();
     const newQR: QRCodeItem = {
       ...data,
@@ -191,14 +214,13 @@ export const Storage = {
       totalScans: 0,
     };
 
-    // Prepend new QR code so it displays at the top
     db.qrCodes.unshift(newQR);
-    saveDatabase(db);
+    await saveDatabase(db);
     return newQR;
   },
 
-  updateQRCode(id: string, updates: Partial<Omit<QRCodeItem, 'id' | 'createdAt'>>): QRCodeItem | null {
-    const db = loadDatabase();
+  async updateQRCode(id: string, updates: Partial<Omit<QRCodeItem, 'id' | 'createdAt'>>): Promise<QRCodeItem | null> {
+    const db = await loadDatabase();
     const index = db.qrCodes.findIndex((item) => item.id === id);
     if (index === -1) return null;
 
@@ -208,29 +230,29 @@ export const Storage = {
       updatedAt: new Date().toISOString(),
     };
 
-    saveDatabase(db);
+    await saveDatabase(db);
     return db.qrCodes[index];
   },
 
   /**
-   * NEVER PERMANENTLY DELETE:
-   * To prevent accidental data loss, archiving pauses the QR code instead of deleting it.
+   * NEVER DELETED:
+   * To prevent data loss and broken business cards, campaigns are archived/paused
+   * rather than permanently dropped.
    */
-  deleteQRCode(id: string): boolean {
-    const db = loadDatabase();
+  async deleteQRCode(id: string): Promise<boolean> {
+    const db = await loadDatabase();
     const qr = db.qrCodes.find((item) => item.id === id);
     if (qr) {
-      // Safely archive / pause campaign rather than dropping record
       qr.isActive = false;
       qr.updatedAt = new Date().toISOString();
-      saveDatabase(db);
+      await saveDatabase(db);
       return true;
     }
     return false;
   },
 
-  recordScan(scanData: Omit<ScanEvent, 'id' | 'timestamp'>): ScanEvent {
-    const db = loadDatabase();
+  async recordScan(scanData: Omit<ScanEvent, 'id' | 'timestamp'>): Promise<ScanEvent> {
+    const db = await loadDatabase();
     const event: ScanEvent = {
       ...scanData,
       id: `scan_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -245,21 +267,21 @@ export const Storage = {
       db.qrCodes[qrIndex].updatedAt = new Date().toISOString();
     }
 
-    saveDatabase(db);
+    await saveDatabase(db);
     return event;
   },
 
-  getScansForQRCode(qrCodeId: string): ScanEvent[] {
-    const db = loadDatabase();
+  async getScansForQRCode(qrCodeId: string): Promise<ScanEvent[]> {
+    const db = await loadDatabase();
     return db.scans.filter((scan) => scan.qrCodeId === qrCodeId);
   },
 
-  getAllScans(): ScanEvent[] {
-    const db = loadDatabase();
+  async getAllScans(): Promise<ScanEvent[]> {
+    const db = await loadDatabase();
     return db.scans;
   },
 
-  exportDatabase(): DatabaseSchema {
-    return loadDatabase();
+  async exportDatabase(): Promise<DatabaseSchema> {
+    return await loadDatabase();
   },
 };
