@@ -12,6 +12,10 @@ const globalForDb = globalThis as unknown as {
   __qrDbCache?: DatabaseSchema;
 };
 
+// Check for Vercel KV / Upstash Redis credentials
+const redisUrl = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+const redisToken = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+
 // Determine storage path (falls back to /tmp if read-only filesystem on Vercel)
 function getStoragePath(): string {
   try {
@@ -27,7 +31,6 @@ function getStoragePath(): string {
 
 function getInitialSeed(): DatabaseSchema {
   const now = new Date();
-  const yesterday = new Date(Date.now() - 86400000);
   const twoDaysAgo = new Date(Date.now() - 172800000);
 
   const initialQRs: QRCodeItem[] = [
@@ -59,7 +62,6 @@ function getInitialSeed(): DatabaseSchema {
     }
   ];
 
-  // Seed realistic scan events
   const initialScans: ScanEvent[] = [];
   const devices: ('mobile' | 'desktop' | 'tablet')[] = ['mobile', 'mobile', 'mobile', 'mobile', 'desktop', 'tablet'];
   const osList = ['iOS', 'iOS', 'Android', 'Android', 'macOS', 'Windows'];
@@ -114,6 +116,15 @@ function loadDatabase(): DatabaseSchema {
       const content = fs.readFileSync(filePath, 'utf-8');
       const parsed = JSON.parse(content);
       if (parsed && Array.isArray(parsed.qrCodes) && Array.isArray(parsed.scans)) {
+        // Guarantee seed QRs are preserved if not present
+        const seed = getInitialSeed();
+        const existingIds = new Set(parsed.qrCodes.map((q: QRCodeItem) => q.id));
+        seed.qrCodes.forEach(seedQR => {
+          if (!existingIds.has(seedQR.id)) {
+            parsed.qrCodes.push(seedQR);
+          }
+        });
+
         globalForDb.__qrDbCache = parsed;
         return parsed;
       }
@@ -135,6 +146,22 @@ function saveDatabase(data: DatabaseSchema): void {
   } catch (err) {
     console.warn('Failed to write db file to disk:', err);
   }
+
+  // Asynchronous sync to cloud Redis if configured
+  if (redisUrl && redisToken) {
+    try {
+      fetch(`${redisUrl}/set/qr_database_master`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${redisToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      }).catch((e) => console.warn('Redis sync error:', e));
+    } catch {
+      // ignore async sync errors
+    }
+  }
 }
 
 export const Storage = {
@@ -145,12 +172,12 @@ export const Storage = {
 
   getQRCodeBySlug(slug: string): QRCodeItem | undefined {
     const db = loadDatabase();
-    return db.qrCodes.find(item => item.slug.toLowerCase() === slug.toLowerCase());
+    return db.qrCodes.find((item) => item.slug.toLowerCase() === slug.toLowerCase());
   },
 
   getQRCodeById(id: string): QRCodeItem | undefined {
     const db = loadDatabase();
-    return db.qrCodes.find(item => item.id === id);
+    return db.qrCodes.find((item) => item.id === id);
   },
 
   createQRCode(data: Omit<QRCodeItem, 'id' | 'createdAt' | 'updatedAt' | 'totalScans'>): QRCodeItem {
@@ -161,9 +188,10 @@ export const Storage = {
       id: `qr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       createdAt: now,
       updatedAt: now,
-      totalScans: 0
+      totalScans: 0,
     };
 
+    // Prepend new QR code so it displays at the top
     db.qrCodes.unshift(newQR);
     saveDatabase(db);
     return newQR;
@@ -171,25 +199,30 @@ export const Storage = {
 
   updateQRCode(id: string, updates: Partial<Omit<QRCodeItem, 'id' | 'createdAt'>>): QRCodeItem | null {
     const db = loadDatabase();
-    const index = db.qrCodes.findIndex(item => item.id === id);
+    const index = db.qrCodes.findIndex((item) => item.id === id);
     if (index === -1) return null;
 
     db.qrCodes[index] = {
       ...db.qrCodes[index],
       ...updates,
-      updatedAt: new Date().toISOString()
+      updatedAt: new Date().toISOString(),
     };
 
     saveDatabase(db);
     return db.qrCodes[index];
   },
 
+  /**
+   * NEVER PERMANENTLY DELETE:
+   * To prevent accidental data loss, archiving pauses the QR code instead of deleting it.
+   */
   deleteQRCode(id: string): boolean {
     const db = loadDatabase();
-    const initialLen = db.qrCodes.length;
-    db.qrCodes = db.qrCodes.filter(item => item.id !== id);
-    db.scans = db.scans.filter(scan => scan.qrCodeId !== id);
-    if (db.qrCodes.length !== initialLen) {
+    const qr = db.qrCodes.find((item) => item.id === id);
+    if (qr) {
+      // Safely archive / pause campaign rather than dropping record
+      qr.isActive = false;
+      qr.updatedAt = new Date().toISOString();
       saveDatabase(db);
       return true;
     }
@@ -201,13 +234,12 @@ export const Storage = {
     const event: ScanEvent = {
       ...scanData,
       id: `scan_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     };
 
     db.scans.unshift(event);
 
-    // Increment count on the matching QR code
-    const qrIndex = db.qrCodes.findIndex(item => item.id === scanData.qrCodeId);
+    const qrIndex = db.qrCodes.findIndex((item) => item.id === scanData.qrCodeId);
     if (qrIndex !== -1) {
       db.qrCodes[qrIndex].totalScans = (db.qrCodes[qrIndex].totalScans || 0) + 1;
       db.qrCodes[qrIndex].updatedAt = new Date().toISOString();
@@ -219,11 +251,15 @@ export const Storage = {
 
   getScansForQRCode(qrCodeId: string): ScanEvent[] {
     const db = loadDatabase();
-    return db.scans.filter(scan => scan.qrCodeId === qrCodeId);
+    return db.scans.filter((scan) => scan.qrCodeId === qrCodeId);
   },
 
   getAllScans(): ScanEvent[] {
     const db = loadDatabase();
     return db.scans;
-  }
+  },
+
+  exportDatabase(): DatabaseSchema {
+    return loadDatabase();
+  },
 };

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   QrCode,
   BarChart3,
@@ -10,19 +11,24 @@ import {
   Download,
   ExternalLink,
   Edit2,
-  Trash2,
   Search,
   Smartphone,
   Globe,
   TrendingUp,
   X,
   Layers,
-  Sparkles
+  Sparkles,
+  LogOut,
+  Database,
+  Shield,
+  PauseCircle,
+  PlayCircle
 } from 'lucide-react';
 import { QRCodeItem, QRCodeWithStats } from '@/lib/types';
 import { generateQRDataUrl, generateQRSvg } from '@/lib/qrHelper';
 
 export default function DashboardPage() {
+  const router = useRouter();
   const [qrList, setQrList] = useState<QRCodeItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -218,20 +224,36 @@ export default function DashboardPage() {
     }
   };
 
-  const handleDeleteQR = async (qr: QRCodeItem) => {
-    if (!confirm(`Are you sure you want to delete "${qr.title}" and its analytics history?`)) {
-      return;
-    }
-
+  const handleToggleActive = async (qr: QRCodeItem) => {
+    const nextState = !qr.isActive;
     try {
-      const res = await fetch(`/api/qrcodes/${qr.id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/qrcodes/${qr.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isActive: nextState }),
+      });
       if (res.ok) {
-        showToast('QR Code deleted.');
+        showToast(nextState ? 'Campaign activated!' : 'Campaign paused (Preserved in database).');
         fetchQRCodes();
       }
-    } catch (err) {
-      alert('Error deleting QR code');
+    } catch {
+      alert('Error toggling campaign status');
     }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      router.push('/login');
+      router.refresh();
+    } catch {
+      router.push('/login');
+    }
+  };
+
+  const handleExportBackup = () => {
+    window.open('/api/backup', '_blank');
+    showToast('Database backup downloaded!');
   };
 
   // High-Res PNG & Vector SVG Downloads
@@ -310,6 +332,34 @@ export default function DashboardPage() {
         </div>
 
         <div className="nav-actions">
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'rgba(16, 185, 129, 0.12)',
+              border: '1px solid rgba(16, 185, 129, 0.3)',
+              color: '#34d399',
+              padding: '6px 12px',
+              borderRadius: '20px',
+              fontSize: '12px',
+              fontWeight: 700,
+            }}
+          >
+            <Shield size={14} />
+            <span>Admin</span>
+          </div>
+
+          <button
+            type="button"
+            className="btn-secondary"
+            title="Download full JSON database backup"
+            onClick={handleExportBackup}
+          >
+            <Database size={15} />
+            <span>Export Backup</span>
+          </button>
+
           <button
             type="button"
             className="btn-primary"
@@ -317,6 +367,17 @@ export default function DashboardPage() {
           >
             <Plus size={18} />
             <span>Create New QR Code</span>
+          </button>
+
+          <button
+            type="button"
+            className="btn-secondary"
+            style={{ color: '#f87171', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+            title="Log Out"
+            onClick={handleLogout}
+          >
+            <LogOut size={15} />
+            <span>Logout</span>
           </button>
         </div>
       </header>
@@ -549,11 +610,18 @@ export default function DashboardPage() {
                   <button
                     type="button"
                     className="btn-card-action"
-                    style={{ flex: 'none', color: '#f43f5e' }}
-                    title="Delete QR Code"
-                    onClick={() => handleDeleteQR(qr)}
+                    style={{
+                      flex: 'none',
+                      color: qr.isActive ? '#f59e0b' : '#10b981',
+                    }}
+                    title={
+                      qr.isActive
+                        ? 'Pause Campaign (QR code is permanently preserved)'
+                        : 'Resume Campaign'
+                    }
+                    onClick={() => handleToggleActive(qr)}
                   >
-                    <Trash2 size={14} />
+                    {qr.isActive ? <PauseCircle size={15} /> : <PlayCircle size={15} />}
                   </button>
                 </div>
               </article>
