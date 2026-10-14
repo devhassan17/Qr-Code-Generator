@@ -1,3 +1,12 @@
+export interface UserProfile {
+  id: string;
+  username: string;
+  name: string;
+  password?: string;
+  role: 'admin' | 'user';
+  createdAt: string;
+}
+
 export interface QRCodeItem {
   id: string;
   title: string;
@@ -10,6 +19,8 @@ export interface QRCodeItem {
   colorDark: string;
   colorLight: string;
   totalScans: number;
+  createdByUserId?: string;
+  createdByName?: string;
 }
 
 export interface ScanEvent {

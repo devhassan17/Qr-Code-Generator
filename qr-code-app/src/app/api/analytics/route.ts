@@ -1,14 +1,30 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { Storage } from '@/lib/storage';
+import { getSessionUser } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
-  const qrCodes = await Storage.getAllQRCodes();
-  const scans = await Storage.getAllScans();
+export async function GET(request: NextRequest) {
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  let filterUserId: string | undefined = undefined;
+  if (sessionUser.role === 'admin') {
+    const requestedUser = request.nextUrl.searchParams.get('userId');
+    if (requestedUser && requestedUser !== 'all') {
+      filterUserId = requestedUser;
+    }
+  } else {
+    filterUserId = sessionUser.id;
+  }
+
+  const qrCodes = await Storage.getAllQRCodes(filterUserId);
+  const scans = await Storage.getAllScans(filterUserId);
 
   const totalScans = scans.length;
-  const activeQRs = qrCodes.filter(q => q.isActive).length;
+  const activeQRs = qrCodes.filter((q) => q.isActive).length;
 
   let mobileScans = 0;
   const scansByDay: Record<string, number> = {};
@@ -20,7 +36,7 @@ export async function GET() {
     scansByDay[dateStr] = 0;
   }
 
-  scans.forEach(scan => {
+  scans.forEach((scan) => {
     if (scan.deviceType === 'mobile') mobileScans++;
     const dateStr = scan.timestamp.split('T')[0];
     if (scansByDay[dateStr] !== undefined) {
@@ -36,10 +52,10 @@ export async function GET() {
       activeQRCodes: activeQRs,
       totalScans,
       mobileScans,
-      mobilePercent
+      mobilePercent,
     },
     trend: Object.keys(scansByDay)
       .sort()
-      .map(date => ({ date, count: scansByDay[date] }))
+      .map((date) => ({ date, count: scansByDay[date] })),
   });
 }

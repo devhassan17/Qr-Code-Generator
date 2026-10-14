@@ -1,9 +1,10 @@
 import fs from 'fs';
 import path from 'path';
 import { Redis } from '@upstash/redis';
-import { QRCodeItem, ScanEvent } from './types';
+import { QRCodeItem, ScanEvent, UserProfile } from './types';
 
 interface DatabaseSchema {
+  users: UserProfile[];
   qrCodes: QRCodeItem[];
   scans: ScanEvent[];
 }
@@ -36,6 +37,25 @@ function getInitialSeed(): DatabaseSchema {
   const now = new Date();
   const twoDaysAgo = new Date(Date.now() - 172800000);
 
+  const initialUsers: UserProfile[] = [
+    {
+      id: 'usr_admin',
+      username: 'admin',
+      name: 'Administrator',
+      password: 'Qwerty123!@#',
+      role: 'admin',
+      createdAt: twoDaysAgo.toISOString(),
+    },
+    {
+      id: 'usr_rep_1',
+      username: 'mikerep',
+      name: 'Mike Stevens (Rep)',
+      password: 'Rep123!',
+      role: 'user',
+      createdAt: twoDaysAgo.toISOString(),
+    },
+  ];
+
   const initialQRs: QRCodeItem[] = [
     {
       id: 'qr_specials_1',
@@ -49,6 +69,8 @@ function getInitialSeed(): DatabaseSchema {
       colorDark: '#0f172a',
       colorLight: '#ffffff',
       totalScans: 42,
+      createdByUserId: 'usr_rep_1',
+      createdByName: 'Mike Stevens (Rep)',
     },
     {
       id: 'qr_main_site',
@@ -62,6 +84,8 @@ function getInitialSeed(): DatabaseSchema {
       colorDark: '#047857',
       colorLight: '#ffffff',
       totalScans: 19,
+      createdByUserId: 'usr_admin',
+      createdByName: 'Administrator',
     },
   ];
 
@@ -105,7 +129,7 @@ function getInitialSeed(): DatabaseSchema {
     });
   }
 
-  return { qrCodes: initialQRs, scans: initialScans };
+  return { users: initialUsers, qrCodes: initialQRs, scans: initialScans };
 }
 
 /**
@@ -119,10 +143,15 @@ async function loadDatabase(): Promise<DatabaseSchema> {
     try {
       const cloudData = await redis.get<DatabaseSchema>(REDIS_DB_KEY);
       if (cloudData && Array.isArray(cloudData.qrCodes) && Array.isArray(cloudData.scans)) {
+        if (!Array.isArray(cloudData.users)) {
+          cloudData.users = getInitialSeed().users;
+        }
+        if (!cloudData.users.some((u) => u.username.toLowerCase() === 'admin')) {
+          cloudData.users.unshift(getInitialSeed().users[0]);
+        }
         globalForDb.__qrDbCache = cloudData;
         return cloudData;
       } else {
-        // Initialize cloud database with initial seed
         const seed = getInitialSeed();
         await redis.set(REDIS_DB_KEY, seed);
         globalForDb.__qrDbCache = seed;
@@ -135,6 +164,9 @@ async function loadDatabase(): Promise<DatabaseSchema> {
 
   // Local filesystem fallback
   if (globalForDb.__qrDbCache) {
+    if (!Array.isArray(globalForDb.__qrDbCache.users)) {
+      globalForDb.__qrDbCache.users = getInitialSeed().users;
+    }
     return globalForDb.__qrDbCache;
   }
 
@@ -144,6 +176,12 @@ async function loadDatabase(): Promise<DatabaseSchema> {
       const content = fs.readFileSync(filePath, 'utf-8');
       const parsed = JSON.parse(content);
       if (parsed && Array.isArray(parsed.qrCodes) && Array.isArray(parsed.scans)) {
+        if (!Array.isArray(parsed.users)) {
+          parsed.users = getInitialSeed().users;
+        }
+        if (!parsed.users.some((u: UserProfile) => u.username.toLowerCase() === 'admin')) {
+          parsed.users.unshift(getInitialSeed().users[0]);
+        }
         globalForDb.__qrDbCache = parsed;
         return parsed;
       }
@@ -188,8 +226,54 @@ export const Storage = {
     return redis !== null;
   },
 
-  async getAllQRCodes(): Promise<QRCodeItem[]> {
+  // --- Users & Profiles ---
+  async getAllUsers(): Promise<UserProfile[]> {
     const db = await loadDatabase();
+    return db.users.map(({ password, ...u }) => u as UserProfile);
+  },
+
+  async getUserById(id: string): Promise<UserProfile | undefined> {
+    const db = await loadDatabase();
+    return db.users.find((u) => u.id === id);
+  },
+
+  async getUserByUsername(username: string): Promise<UserProfile | undefined> {
+    const db = await loadDatabase();
+    return db.users.find((u) => u.username.toLowerCase() === username.trim().toLowerCase());
+  },
+
+  async createUser(data: {
+    username: string;
+    name: string;
+    password: string;
+    role?: 'admin' | 'user';
+  }): Promise<UserProfile> {
+    const db = await loadDatabase();
+    const cleanUsername = data.username.trim().toLowerCase();
+    if (db.users.some((u) => u.username.toLowerCase() === cleanUsername)) {
+      throw new Error('Username is already taken');
+    }
+
+    const newUser: UserProfile = {
+      id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      username: cleanUsername,
+      name: data.name.trim(),
+      password: data.password,
+      role: data.role || 'user',
+      createdAt: new Date().toISOString(),
+    };
+
+    db.users.push(newUser);
+    await saveDatabase(db);
+    return newUser;
+  },
+
+  // --- QR Codes ---
+  async getAllQRCodes(filterUserId?: string): Promise<QRCodeItem[]> {
+    const db = await loadDatabase();
+    if (filterUserId && filterUserId !== 'all') {
+      return db.qrCodes.filter((item) => item.createdByUserId === filterUserId);
+    }
     return db.qrCodes;
   },
 
@@ -203,7 +287,9 @@ export const Storage = {
     return db.qrCodes.find((item) => item.id === id);
   },
 
-  async createQRCode(data: Omit<QRCodeItem, 'id' | 'createdAt' | 'updatedAt' | 'totalScans'>): Promise<QRCodeItem> {
+  async createQRCode(
+    data: Omit<QRCodeItem, 'id' | 'createdAt' | 'updatedAt' | 'totalScans'>
+  ): Promise<QRCodeItem> {
     const db = await loadDatabase();
     const now = new Date().toISOString();
     const newQR: QRCodeItem = {
@@ -219,7 +305,10 @@ export const Storage = {
     return newQR;
   },
 
-  async updateQRCode(id: string, updates: Partial<Omit<QRCodeItem, 'id' | 'createdAt'>>): Promise<QRCodeItem | null> {
+  async updateQRCode(
+    id: string,
+    updates: Partial<Omit<QRCodeItem, 'id' | 'createdAt'>>
+  ): Promise<QRCodeItem | null> {
     const db = await loadDatabase();
     const index = db.qrCodes.findIndex((item) => item.id === id);
     if (index === -1) return null;
@@ -251,6 +340,7 @@ export const Storage = {
     return false;
   },
 
+  // --- Scans & Analytics ---
   async recordScan(scanData: Omit<ScanEvent, 'id' | 'timestamp'>): Promise<ScanEvent> {
     const db = await loadDatabase();
     const event: ScanEvent = {
@@ -276,8 +366,16 @@ export const Storage = {
     return db.scans.filter((scan) => scan.qrCodeId === qrCodeId);
   },
 
-  async getAllScans(): Promise<ScanEvent[]> {
+  async getAllScans(filterUserId?: string): Promise<ScanEvent[]> {
     const db = await loadDatabase();
+    if (filterUserId && filterUserId !== 'all') {
+      const userQRs = new Set(
+        db.qrCodes
+          .filter((item) => item.createdByUserId === filterUserId)
+          .map((item) => item.id)
+      );
+      return db.scans.filter((scan) => userQRs.has(scan.qrCodeId));
+    }
     return db.scans;
   },
 

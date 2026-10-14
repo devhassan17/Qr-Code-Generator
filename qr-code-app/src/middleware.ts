@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { decodeSession } from './lib/auth';
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // 1. Always allow customer scan redirects (/r/[slug]) and static assets
+  // 1. Always allow customer scan redirects (/r/[slug]), static assets, and auth APIs
   if (
     pathname.startsWith('/r/') ||
     pathname.startsWith('/_next') ||
@@ -15,7 +16,8 @@ export function middleware(request: NextRequest) {
   }
 
   const authCookie = request.cookies.get('qr_session_auth');
-  const isAuthenticated = authCookie && authCookie.value === 'authenticated_admin_session';
+  const sessionUser = decodeSession(authCookie?.value);
+  const isAuthenticated = sessionUser !== null;
 
   // 2. If at /login and already logged in, redirect to dashboard
   if (pathname === '/login') {

@@ -1,15 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Storage } from '@/lib/storage';
+import { getSessionUser } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
-  const qrCodes = await Storage.getAllQRCodes();
+export async function GET(request: NextRequest) {
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  let qrCodes;
+  if (sessionUser.role === 'admin') {
+    const filterUserId = request.nextUrl.searchParams.get('userId');
+    qrCodes = await Storage.getAllQRCodes(filterUserId || undefined);
+  } else {
+    qrCodes = await Storage.getAllQRCodes(sessionUser.id);
+  }
+
   return NextResponse.json({ qrCodes });
 }
 
 export async function POST(request: NextRequest) {
   try {
+    const sessionUser = await getSessionUser();
+    if (!sessionUser) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const body = await request.json();
     const { title, slug, destinationUrl, colorDark, colorLight, notes, isActive } = body;
 
@@ -42,7 +60,9 @@ export async function POST(request: NextRequest) {
       colorDark: colorDark || '#0f172a',
       colorLight: colorLight || '#ffffff',
       notes: notes || '',
-      isActive: isActive !== false
+      isActive: isActive !== false,
+      createdByUserId: sessionUser.id,
+      createdByName: sessionUser.name,
     });
 
     return NextResponse.json({ qrCode: created }, { status: 201 });

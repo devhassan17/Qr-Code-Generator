@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Storage } from '@/lib/storage';
+import { encodeSession, SessionUser } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -6,23 +8,62 @@ export async function POST(request: NextRequest) {
   try {
     const { username, password } = await request.json();
 
-    const validUser = 'admin';
-    const validPass = 'Qwerty123!@#';
+    if (!username || !password) {
+      return NextResponse.json(
+        { success: false, error: 'Username and password are required' },
+        { status: 400 }
+      );
+    }
 
-    if (
-      username &&
-      username.trim().toLowerCase() === validUser &&
-      password === validPass
-    ) {
+    const cleanUser = username.trim().toLowerCase();
+
+    // 1. Direct Admin Credential Check
+    if (cleanUser === 'admin' && password === 'Qwerty123!@#') {
+      const sessionUser: SessionUser = {
+        id: 'usr_admin',
+        username: 'admin',
+        name: 'Administrator',
+        role: 'admin',
+      };
+
       const response = NextResponse.json({
         success: true,
-        message: 'Authentication successful',
+        user: sessionUser,
+        message: 'Admin authentication successful',
       });
 
-      // Set cookie for 30 days
       response.cookies.set({
         name: 'qr_session_auth',
-        value: 'authenticated_admin_session',
+        value: encodeSession(sessionUser),
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path: '/',
+        maxAge: 60 * 60 * 24 * 30, // 30 days
+      });
+
+      return response;
+    }
+
+    // 2. Database User Profile Check
+    const user = await Storage.getUserByUsername(cleanUser);
+    if (user && user.password === password) {
+      const sessionUser: SessionUser = {
+        id: user.id,
+        username: user.username,
+        name: user.name,
+        role: user.role,
+      };
+
+      const response = NextResponse.json({
+        success: true,
+        user: sessionUser,
+        message: 'Login successful',
+      });
+
+      response.cookies.set({
+        name: 'qr_session_auth',
+        value: encodeSession(sessionUser),
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
@@ -37,9 +78,9 @@ export async function POST(request: NextRequest) {
       { success: false, error: 'Invalid Username or Password' },
       { status: 401 }
     );
-  } catch {
+  } catch (err: any) {
     return NextResponse.json(
-      { success: false, error: 'Internal server error' },
+      { success: false, error: err.message || 'Internal server error' },
       { status: 500 }
     );
   }

@@ -2,16 +2,25 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { QrCode, Lock, ArrowRight, ShieldCheck, AlertCircle } from 'lucide-react';
+import { QrCode, ArrowRight, ShieldCheck, AlertCircle, UserPlus, LogIn, User } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
+  const [activeTab, setActiveTab] = useState<'signin' | 'register'>('signin');
+
+  // Sign In state
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+
+  // Register state
+  const [regName, setRegName] = useState('');
+  const [regUsername, setRegUsername] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setLoading(true);
@@ -38,6 +47,37 @@ export default function LoginPage() {
     }
   };
 
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+
+    try {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: regName,
+          username: regUsername,
+          password: regPassword,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setError(data.error || 'Error creating profile');
+        setLoading(false);
+        return;
+      }
+
+      router.push('/');
+      router.refresh();
+    } catch {
+      setError('Connection error. Please try again.');
+      setLoading(false);
+    }
+  };
+
   return (
     <div
       style={{
@@ -45,56 +85,125 @@ export default function LoginPage() {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '20px',
+        padding: '24px 16px',
         position: 'relative',
         zIndex: 2,
       }}
     >
       <div
         style={{
-          background: 'rgba(18, 26, 43, 0.92)',
+          background: 'rgba(18, 26, 43, 0.94)',
           border: '1px solid rgba(255, 255, 255, 0.1)',
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
+          backdropFilter: 'blur(24px)',
+          WebkitBackdropFilter: 'blur(24px)',
           borderRadius: '24px',
-          padding: '40px 36px',
-          maxWidth: '420px',
+          padding: '36px 32px',
+          maxWidth: '440px',
           width: '100%',
           boxShadow: '0 25px 60px rgba(0, 0, 0, 0.6)',
           textAlign: 'center',
         }}
       >
+        {/* Brand Icon */}
         <div
           style={{
-            width: '60px',
-            height: '60px',
+            width: '56px',
+            height: '56px',
             borderRadius: '16px',
             background: 'linear-gradient(135deg, #10b981, #059669)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             color: '#fff',
-            margin: '0 auto 20px',
+            margin: '0 auto 16px',
             boxShadow: '0 0 25px rgba(16, 185, 129, 0.35)',
           }}
         >
-          <QrCode size={32} />
+          <QrCode size={30} />
         </div>
 
         <h1
           style={{
-            fontSize: '24px',
+            fontSize: '22px',
             fontWeight: 800,
             color: '#fff',
-            marginBottom: '8px',
+            marginBottom: '6px',
             letterSpacing: '-0.5px',
           }}
         >
-          QR Hub Admin Portal
+          QR Hub & Analytics Portal
         </h1>
-        <p style={{ color: '#94a3b8', fontSize: '14px', marginBottom: '28px' }}>
-          Enter your authorized credentials to manage dynamic QR codes and analytics.
+        <p style={{ color: '#94a3b8', fontSize: '13.5px', marginBottom: '22px' }}>
+          Manage your dynamic QR codes, profile campaigns & scan tracking.
         </p>
+
+        {/* Tab Toggle: Sign In vs Create Profile */}
+        <div
+          style={{
+            display: 'flex',
+            background: 'rgba(255, 255, 255, 0.05)',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            borderRadius: '12px',
+            padding: '4px',
+            marginBottom: '22px',
+            gap: '4px',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('signin');
+              setError(null);
+            }}
+            style={{
+              flex: 1,
+              padding: '9px 12px',
+              borderRadius: '9px',
+              fontSize: '13px',
+              fontWeight: 700,
+              border: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              transition: 'all 0.2s ease',
+              background: activeTab === 'signin' ? '#10b981' : 'transparent',
+              color: activeTab === 'signin' ? '#ffffff' : '#94a3b8',
+              boxShadow: activeTab === 'signin' ? '0 2px 8px rgba(16, 185, 129, 0.4)' : 'none',
+            }}
+          >
+            <LogIn size={15} />
+            <span>Sign In</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('register');
+              setError(null);
+            }}
+            style={{
+              flex: 1,
+              padding: '9px 12px',
+              borderRadius: '9px',
+              fontSize: '13px',
+              fontWeight: 700,
+              border: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              transition: 'all 0.2s ease',
+              background: activeTab === 'register' ? '#10b981' : 'transparent',
+              color: activeTab === 'register' ? '#ffffff' : '#94a3b8',
+              boxShadow: activeTab === 'register' ? '0 2px 8px rgba(16, 185, 129, 0.4)' : 'none',
+            }}
+          >
+            <UserPlus size={15} />
+            <span>Create Profile</span>
+          </button>
+        </div>
 
         {error && (
           <div
@@ -102,88 +211,193 @@ export default function LoginPage() {
               background: 'rgba(239, 68, 68, 0.15)',
               border: '1px solid rgba(239, 68, 68, 0.3)',
               color: '#f87171',
-              padding: '12px 14px',
+              padding: '11px 13px',
               borderRadius: '12px',
-              fontSize: '13.5px',
+              fontSize: '13px',
               fontWeight: 600,
               display: 'flex',
               alignItems: 'center',
               gap: '8px',
-              marginBottom: '20px',
+              marginBottom: '18px',
               textAlign: 'left',
             }}
           >
-            <AlertCircle size={18} style={{ flexShrink: 0 }} />
+            <AlertCircle size={17} style={{ flexShrink: 0 }} />
             <span>{error}</span>
           </div>
         )}
 
-        <form onSubmit={handleSubmit} style={{ textAlign: 'left' }}>
-          <div style={{ marginBottom: '18px' }}>
-            <label
+        {/* --- SIGN IN FORM --- */}
+        {activeTab === 'signin' && (
+          <form onSubmit={handleSignIn} style={{ textAlign: 'left' }}>
+            <div style={{ marginBottom: '16px' }}>
+              <label
+                style={{
+                  display: 'block',
+                  fontSize: '12.5px',
+                  fontWeight: 600,
+                  color: '#cbd5e1',
+                  marginBottom: '6px',
+                }}
+              >
+                Username
+              </label>
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="e.g. Admin or rep username"
+                required
+                autoFocus
+                className="form-input"
+              />
+            </div>
+
+            <div style={{ marginBottom: '22px' }}>
+              <label
+                style={{
+                  display: 'block',
+                  fontSize: '12.5px',
+                  fontWeight: 600,
+                  color: '#cbd5e1',
+                  marginBottom: '6px',
+                }}
+              >
+                Password
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••••••"
+                required
+                className="form-input"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="btn-primary"
               style={{
-                display: 'block',
-                fontSize: '13px',
-                fontWeight: 600,
-                color: '#cbd5e1',
-                marginBottom: '6px',
+                width: '100%',
+                justifyContent: 'center',
+                padding: '12px',
+                fontSize: '14.5px',
               }}
             >
-              Username
-            </label>
-            <input
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="Enter username"
-              required
-              autoFocus
-              className="form-input"
-            />
-          </div>
+              <span>{loading ? 'Authenticating...' : 'Sign In to Dashboard'}</span>
+              <ArrowRight size={16} />
+            </button>
 
-          <div style={{ marginBottom: '24px' }}>
-            <label
+            <div
               style={{
-                display: 'block',
-                fontSize: '13px',
-                fontWeight: 600,
-                color: '#cbd5e1',
-                marginBottom: '6px',
+                marginTop: '16px',
+                padding: '10px 12px',
+                background: 'rgba(255, 255, 255, 0.03)',
+                borderRadius: '10px',
+                border: '1px solid rgba(255, 255, 255, 0.05)',
+                fontSize: '11.5px',
+                color: '#64748b',
+                lineHeight: 1.5,
               }}
             >
-              Password
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••••••"
-              required
-              className="form-input"
-            />
-          </div>
+              🔑 <strong>Admin credentials:</strong> <code style={{ color: '#94a3b8' }}>Admin</code> / <code style={{ color: '#94a3b8' }}>Qwerty123!@#</code>
+            </div>
+          </form>
+        )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="btn-primary"
-            style={{
-              width: '100%',
-              justifyContent: 'center',
-              padding: '13px',
-              fontSize: '15px',
-            }}
-          >
-            <span>{loading ? 'Authenticating...' : 'Sign In to Dashboard'}</span>
-            <ArrowRight size={16} />
-          </button>
-        </form>
+        {/* --- REGISTER NEW PROFILE FORM --- */}
+        {activeTab === 'register' && (
+          <form onSubmit={handleRegister} style={{ textAlign: 'left' }}>
+            <div style={{ marginBottom: '14px' }}>
+              <label
+                style={{
+                  display: 'block',
+                  fontSize: '12.5px',
+                  fontWeight: 600,
+                  color: '#cbd5e1',
+                  marginBottom: '6px',
+                }}
+              >
+                Full Name / Sales Rep Name
+              </label>
+              <input
+                type="text"
+                value={regName}
+                onChange={(e) => setRegName(e.target.value)}
+                placeholder="e.g. Mike Stevens (Rep)"
+                required
+                autoFocus
+                className="form-input"
+              />
+            </div>
+
+            <div style={{ marginBottom: '14px' }}>
+              <label
+                style={{
+                  display: 'block',
+                  fontSize: '12.5px',
+                  fontWeight: 600,
+                  color: '#cbd5e1',
+                  marginBottom: '6px',
+                }}
+              >
+                Choose Username
+              </label>
+              <input
+                type="text"
+                value={regUsername}
+                onChange={(e) => setRegUsername(e.target.value)}
+                placeholder="e.g. mikerep"
+                required
+                className="form-input"
+              />
+            </div>
+
+            <div style={{ marginBottom: '22px' }}>
+              <label
+                style={{
+                  display: 'block',
+                  fontSize: '12.5px',
+                  fontWeight: 600,
+                  color: '#cbd5e1',
+                  marginBottom: '6px',
+                }}
+              >
+                Choose Password
+              </label>
+              <input
+                type="password"
+                value={regPassword}
+                onChange={(e) => setRegPassword(e.target.value)}
+                placeholder="••••••••••••"
+                required
+                className="form-input"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="btn-primary"
+              style={{
+                width: '100%',
+                justifyContent: 'center',
+                padding: '12px',
+                fontSize: '14.5px',
+              }}
+            >
+              <span>{loading ? 'Creating Profile...' : 'Create Profile & Enter'}</span>
+              <ArrowRight size={16} />
+            </button>
+          </form>
+        )}
 
         <div
           style={{
-            marginTop: '28px',
-            paddingTop: '18px',
+            marginTop: '24px',
+            paddingTop: '16px',
             borderTop: '1px solid rgba(255, 255, 255, 0.08)',
             display: 'flex',
             alignItems: 'center',
@@ -194,7 +408,7 @@ export default function LoginPage() {
           }}
         >
           <ShieldCheck size={14} color="#10b981" />
-          <span>Encrypted Session Protection</span>
+          <span>Encrypted Profile Isolation & Cloud Persistence</span>
         </div>
       </div>
     </div>

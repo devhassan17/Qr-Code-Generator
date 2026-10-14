@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Storage } from '@/lib/storage';
+import { getSessionUser } from '@/lib/auth';
 import { QRCodeWithStats } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -8,9 +9,19 @@ export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   const qrItem = await Storage.getQRCodeById(params.id);
   if (!qrItem) {
     return NextResponse.json({ error: 'QR Code not found' }, { status: 404 });
+  }
+
+  // Non-admins can only view stats for their own QR codes
+  if (sessionUser.role !== 'admin' && qrItem.createdByUserId && qrItem.createdByUserId !== sessionUser.id) {
+    return NextResponse.json({ error: 'Forbidden. You do not own this campaign.' }, { status: 403 });
   }
 
   const scans = await Storage.getScansForQRCode(params.id);
@@ -18,7 +29,6 @@ export async function GET(
   // Calculate metrics
   const now = new Date();
   const todayStr = now.toISOString().split('T')[0];
-
   const oneWeekAgo = new Date(Date.now() - 7 * 86400000);
 
   let todayCount = 0;
@@ -36,7 +46,7 @@ export async function GET(
     timelineMap[dateStr] = 0;
   }
 
-  scans.forEach(scan => {
+  scans.forEach((scan) => {
     const scanDate = scan.timestamp.split('T')[0];
     const scanTimestamp = new Date(scan.timestamp).getTime();
 
@@ -57,7 +67,7 @@ export async function GET(
 
   const timeline = Object.keys(timelineMap)
     .sort()
-    .map(date => ({ date, count: timelineMap[date] }));
+    .map((date) => ({ date, count: timelineMap[date] }));
 
   const responseData: QRCodeWithStats = {
     ...qrItem,
@@ -69,8 +79,8 @@ export async function GET(
       deviceBreakdown,
       browserBreakdown,
       osBreakdown,
-      timeline
-    }
+      timeline,
+    },
   };
 
   return NextResponse.json({ qrCode: responseData });
@@ -81,6 +91,20 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
+    const sessionUser = await getSessionUser();
+    if (!sessionUser) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const qrItem = await Storage.getQRCodeById(params.id);
+    if (!qrItem) {
+      return NextResponse.json({ error: 'QR Code not found' }, { status: 404 });
+    }
+
+    if (sessionUser.role !== 'admin' && qrItem.createdByUserId && qrItem.createdByUserId !== sessionUser.id) {
+      return NextResponse.json({ error: 'Forbidden. You do not own this campaign.' }, { status: 403 });
+    }
+
     const body = await request.json();
     const updated = await Storage.updateQRCode(params.id, body);
     if (!updated) {
@@ -96,6 +120,20 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const qrItem = await Storage.getQRCodeById(params.id);
+  if (!qrItem) {
+    return NextResponse.json({ error: 'QR Code not found' }, { status: 404 });
+  }
+
+  if (sessionUser.role !== 'admin' && qrItem.createdByUserId && qrItem.createdByUserId !== sessionUser.id) {
+    return NextResponse.json({ error: 'Forbidden. You do not own this campaign.' }, { status: 403 });
+  }
+
   const success = await Storage.deleteQRCode(params.id);
   if (!success) {
     return NextResponse.json({ error: 'QR Code not found' }, { status: 404 });

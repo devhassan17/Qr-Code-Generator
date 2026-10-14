@@ -22,13 +22,27 @@ import {
   Database,
   Shield,
   PauseCircle,
-  PlayCircle
+  PlayCircle,
+  User,
+  Users
 } from 'lucide-react';
-import { QRCodeItem, QRCodeWithStats } from '@/lib/types';
+import { QRCodeItem, QRCodeWithStats, UserProfile } from '@/lib/types';
 import { generateQRDataUrl, generateQRSvg } from '@/lib/qrHelper';
+
+interface CurrentUser {
+  id: string;
+  username: string;
+  name: string;
+  role: 'admin' | 'user';
+}
 
 export default function DashboardPage() {
   const router = useRouter();
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [usersList, setUsersList] = useState<UserProfile[]>([]);
+  const [selectedUserFilter, setSelectedUserFilter] = useState<string>('all');
+  const [isProfilesModalOpen, setIsProfilesModalOpen] = useState(false);
+
   const [qrList, setQrList] = useState<QRCodeItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -52,6 +66,7 @@ export default function DashboardPage() {
   const [newColorDark, setNewColorDark] = useState('#0f172a');
   const [newColorLight, setNewColorLight] = useState('#ffffff');
   const [newNotes, setNewNotes] = useState('');
+  const [assignedUserId, setAssignedUserId] = useState<string>('');
   const [createPreviewUrl, setCreatePreviewUrl] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -62,13 +77,50 @@ export default function DashboardPage() {
     if (typeof window !== 'undefined') {
       setOrigin(window.location.origin);
     }
-    fetchQRCodes();
+    loadUserAndData();
   }, []);
 
-  const fetchQRCodes = async () => {
+  const loadUserAndData = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/qrcodes');
+      const meRes = await fetch('/api/auth/me');
+      if (meRes.ok) {
+        const meData = await meRes.json();
+        if (meData.user) {
+          setCurrentUser(meData.user);
+          setAssignedUserId(meData.user.id);
+
+          if (meData.user.role === 'admin') {
+            try {
+              const usersRes = await fetch('/api/auth/users');
+              if (usersRes.ok) {
+                const uData = await usersRes.json();
+                if (uData.users) {
+                  setUsersList(uData.users);
+                }
+              }
+            } catch (err) {
+              console.error('Failed to load user profiles:', err);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load user session:', err);
+    }
+    fetchQRCodes('all');
+  };
+
+  const fetchQRCodes = async (filterUserId?: string) => {
+    try {
+      setLoading(true);
+      const targetFilter = filterUserId !== undefined ? filterUserId : selectedUserFilter;
+      const url =
+        targetFilter && targetFilter !== 'all'
+          ? `/api/qrcodes?userId=${encodeURIComponent(targetFilter)}`
+          : '/api/qrcodes';
+
+      const res = await fetch(url);
       const data = await res.json();
       if (data.qrCodes) {
         setQrList(data.qrCodes);
@@ -81,6 +133,11 @@ export default function DashboardPage() {
     }
   };
 
+  const handleFilterUser = (userId: string) => {
+    setSelectedUserFilter(userId);
+    fetchQRCodes(userId);
+  };
+
   const generatePreviews = async (items: QRCodeItem[]) => {
     const previews: Record<string, string> = {};
     const currentOrigin = window.location.origin;
@@ -91,7 +148,7 @@ export default function DashboardPage() {
         const dataUrl = await generateQRDataUrl(fullUrl, {
           width: 200,
           colorDark: item.colorDark || '#0f172a',
-          colorLight: item.colorLight || '#ffffff'
+          colorLight: item.colorLight || '#ffffff',
         });
         previews[item.id] = dataUrl;
       } catch (err) {
@@ -110,7 +167,7 @@ export default function DashboardPage() {
         const url = await generateQRDataUrl(previewTarget, {
           width: 250,
           colorDark: newColorDark,
-          colorLight: newColorLight
+          colorLight: newColorLight,
         });
         setCreatePreviewUrl(url);
       } catch (e) {
@@ -151,8 +208,8 @@ export default function DashboardPage() {
           destinationUrl: newDestinationUrl.trim(),
           colorDark: newColorDark,
           colorLight: newColorLight,
-          notes: newNotes.trim()
-        })
+          notes: newNotes.trim(),
+        }),
       });
 
       const data = await res.json();
@@ -164,7 +221,7 @@ export default function DashboardPage() {
       showToast(`QR Code "${data.qrCode.title}" created successfully!`);
       setIsCreateModalOpen(false);
       resetCreateForm();
-      fetchQRCodes();
+      fetchQRCodes(selectedUserFilter);
     } catch (err: any) {
       alert(err.message || 'Error creating QR code');
     } finally {
@@ -210,14 +267,14 @@ export default function DashboardPage() {
         body: JSON.stringify({
           title: editingQR.title,
           destinationUrl: editingQR.destinationUrl,
-          isActive: editingQR.isActive
-        })
+          isActive: editingQR.isActive,
+        }),
       });
 
       if (res.ok) {
         showToast('QR Code updated successfully!');
         setIsEditModalOpen(false);
-        fetchQRCodes();
+        fetchQRCodes(selectedUserFilter);
       }
     } catch (err) {
       alert('Error updating QR code');
@@ -234,7 +291,7 @@ export default function DashboardPage() {
       });
       if (res.ok) {
         showToast(nextState ? 'Campaign activated!' : 'Campaign paused (Preserved in database).');
-        fetchQRCodes();
+        fetchQRCodes(selectedUserFilter);
       }
     } catch {
       alert('Error toggling campaign status');
@@ -264,7 +321,7 @@ export default function DashboardPage() {
       margin: 4,
       colorDark: qr.colorDark || '#0f172a',
       colorLight: qr.colorLight || '#ffffff',
-      errorCorrectionLevel: 'H'
+      errorCorrectionLevel: 'H',
     });
 
     const a = document.createElement('a');
@@ -282,7 +339,7 @@ export default function DashboardPage() {
       margin: 2,
       colorDark: qr.colorDark || '#0f172a',
       colorLight: qr.colorLight || '#ffffff',
-      errorCorrectionLevel: 'H'
+      errorCorrectionLevel: 'H',
     });
 
     const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
@@ -303,17 +360,18 @@ export default function DashboardPage() {
   }, [qrList]);
 
   const activeQRsCount = useMemo(() => {
-    return qrList.filter(q => q.isActive).length;
+    return qrList.filter((q) => q.isActive).length;
   }, [qrList]);
 
   const filteredQRs = useMemo(() => {
     if (!searchQuery.trim()) return qrList;
     const q = searchQuery.toLowerCase();
     return qrList.filter(
-      item =>
+      (item) =>
         item.title.toLowerCase().includes(q) ||
         item.slug.toLowerCase().includes(q) ||
-        item.destinationUrl.toLowerCase().includes(q)
+        item.destinationUrl.toLowerCase().includes(q) ||
+        (item.createdByName && item.createdByName.toLowerCase().includes(q))
     );
   }, [qrList, searchQuery]);
 
@@ -332,33 +390,62 @@ export default function DashboardPage() {
         </div>
 
         <div className="nav-actions">
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              background: 'rgba(16, 185, 129, 0.12)',
-              border: '1px solid rgba(16, 185, 129, 0.3)',
-              color: '#34d399',
-              padding: '6px 12px',
-              borderRadius: '20px',
-              fontSize: '12px',
-              fontWeight: 700,
-            }}
-          >
-            <Shield size={14} />
-            <span>Admin</span>
-          </div>
+          {/* User / Admin Role Badge */}
+          {currentUser && (
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                background:
+                  currentUser.role === 'admin'
+                    ? 'rgba(16, 185, 129, 0.12)'
+                    : 'rgba(59, 130, 246, 0.12)',
+                border: `1px solid ${
+                  currentUser.role === 'admin'
+                    ? 'rgba(16, 185, 129, 0.3)'
+                    : 'rgba(59, 130, 246, 0.3)'
+                }`,
+                color: currentUser.role === 'admin' ? '#34d399' : '#60a5fa',
+                padding: '6px 12px',
+                borderRadius: '20px',
+                fontSize: '12px',
+                fontWeight: 700,
+              }}
+            >
+              {currentUser.role === 'admin' ? <Shield size={14} /> : <User size={14} />}
+              <span>
+                {currentUser.role === 'admin' ? 'Admin: ' : 'Profile: '}
+                {currentUser.name}
+              </span>
+            </div>
+          )}
 
-          <button
-            type="button"
-            className="btn-secondary"
-            title="Download full JSON database backup"
-            onClick={handleExportBackup}
-          >
-            <Database size={15} />
-            <span>Export Backup</span>
-          </button>
+          {/* Admin Manage Profiles Button */}
+          {currentUser?.role === 'admin' && (
+            <button
+              type="button"
+              className="btn-secondary"
+              title="View all registered profiles"
+              onClick={() => setIsProfilesModalOpen(true)}
+            >
+              <Users size={15} />
+              <span>Profiles ({usersList.length})</span>
+            </button>
+          )}
+
+          {/* Admin Database Backup Button */}
+          {currentUser?.role === 'admin' && (
+            <button
+              type="button"
+              className="btn-secondary"
+              title="Download full JSON database backup"
+              onClick={handleExportBackup}
+            >
+              <Database size={15} />
+              <span>Export Backup</span>
+            </button>
+          )}
 
           <button
             type="button"
@@ -386,7 +473,11 @@ export default function DashboardPage() {
       <section className="metrics-grid">
         <div className="metric-card">
           <div>
-            <div className="metric-title">Total Active QR Codes</div>
+            <div className="metric-title">
+              {currentUser?.role === 'admin' && selectedUserFilter === 'all'
+                ? 'Total Active QR Codes (All Profiles)'
+                : 'Your Active QR Codes'}
+            </div>
             <div className="metric-value">{activeQRsCount}</div>
             <div className="metric-sub">{qrList.length} total generated campaigns</div>
           </div>
@@ -429,10 +520,114 @@ export default function DashboardPage() {
         </div>
       </section>
 
+      {/* ADMIN MULTI-PROFILE SELECTOR BAR */}
+      {currentUser?.role === 'admin' && (
+        <section
+          style={{
+            background: 'rgba(18, 26, 43, 0.7)',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            backdropFilter: 'blur(16px)',
+            borderRadius: '16px',
+            padding: '16px 20px',
+            marginBottom: '26px',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: '12px',
+              flexWrap: 'wrap',
+              gap: '8px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Users size={17} color="#10b981" />
+              <span style={{ fontSize: '14px', fontWeight: 700, color: '#f8fafc' }}>
+                Admin Multi-Profile View:
+              </span>
+              <span style={{ fontSize: '12px', color: '#94a3b8' }}>
+                (Click any profile to filter QR codes, or choose All)
+              </span>
+            </div>
+            <span
+              style={{
+                fontSize: '12px',
+                color: '#34d399',
+                background: 'rgba(16, 185, 129, 0.1)',
+                padding: '3px 10px',
+                borderRadius: '12px',
+                fontWeight: 600,
+              }}
+            >
+              👑 Admin Mode: Full Visibility
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+            <button
+              type="button"
+              onClick={() => handleFilterUser('all')}
+              style={{
+                padding: '7px 16px',
+                borderRadius: '10px',
+                fontSize: '13px',
+                fontWeight: 600,
+                border: '1px solid',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+                background: selectedUserFilter === 'all' ? '#10b981' : 'rgba(255, 255, 255, 0.04)',
+                borderColor: selectedUserFilter === 'all' ? '#10b981' : 'rgba(255, 255, 255, 0.1)',
+                color: selectedUserFilter === 'all' ? '#ffffff' : '#cbd5e1',
+                boxShadow:
+                  selectedUserFilter === 'all' ? '0 2px 10px rgba(16, 185, 129, 0.3)' : 'none',
+              }}
+            >
+              🌐 All Profiles
+            </button>
+
+            {usersList.map((u) => (
+              <button
+                key={u.id}
+                type="button"
+                onClick={() => handleFilterUser(u.id)}
+                style={{
+                  padding: '7px 16px',
+                  borderRadius: '10px',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  border: '1px solid',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                  background:
+                    selectedUserFilter === u.id ? '#10b981' : 'rgba(255, 255, 255, 0.04)',
+                  borderColor:
+                    selectedUserFilter === u.id ? '#10b981' : 'rgba(255, 255, 255, 0.1)',
+                  color: selectedUserFilter === u.id ? '#ffffff' : '#cbd5e1',
+                  boxShadow:
+                    selectedUserFilter === u.id ? '0 2px 10px rgba(16, 185, 129, 0.3)' : 'none',
+                }}
+              >
+                👤 {u.name} <span style={{ opacity: 0.7, fontSize: '11.5px' }}>({u.username})</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* Filter and Section Header */}
       <div className="section-toolbar">
         <div>
-          <h2 className="section-title">Your QR Code Campaigns</h2>
+          <h2 className="section-title">
+            {currentUser?.role === 'admin'
+              ? selectedUserFilter === 'all'
+                ? 'All QR Code Campaigns (Admin Global View)'
+                : `QR Campaigns for: ${
+                    usersList.find((u) => u.id === selectedUserFilter)?.name || 'Selected Profile'
+                  }`
+              : 'Your QR Code Campaigns'}
+          </h2>
           <p className="section-subtitle">
             Manage destinations, monitor scan analytics, and download print-ready files.
           </p>
@@ -442,9 +637,9 @@ export default function DashboardPage() {
           <Search size={16} className="search-icon" />
           <input
             type="text"
-            placeholder="Search by title, slug, or URL..."
+            placeholder="Search title, slug, or profile..."
             value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
+            onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
       </div>
@@ -452,7 +647,7 @@ export default function DashboardPage() {
       {/* QR Codes Grid */}
       {loading ? (
         <div style={{ textAlign: 'center', padding: '60px', color: '#94a3b8' }}>
-          Loading your QR code campaigns...
+          Loading QR code campaigns...
         </div>
       ) : filteredQRs.length === 0 ? (
         <div
@@ -461,7 +656,7 @@ export default function DashboardPage() {
             padding: '60px 20px',
             background: 'var(--card-bg)',
             borderRadius: 'var(--radius-lg)',
-            border: '1px dashed var(--card-border)'
+            border: '1px dashed var(--card-border)',
           }}
         >
           <QrCode size={48} color="#64748b" style={{ margin: '0 auto 14px' }} />
@@ -471,6 +666,8 @@ export default function DashboardPage() {
           <p style={{ color: '#94a3b8', fontSize: '14px', marginBottom: '20px' }}>
             {searchQuery
               ? 'No campaigns match your search filter.'
+              : selectedUserFilter !== 'all'
+              ? 'This profile has not generated any QR codes yet.'
               : 'Create your first dynamic QR code to start tracking customer scans!'}
           </p>
           <button
@@ -484,7 +681,7 @@ export default function DashboardPage() {
         </div>
       ) : (
         <div className="qr-grid">
-          {filteredQRs.map(qr => {
+          {filteredQRs.map((qr) => {
             const previewImg = qrPreviews[qr.id];
             const shortUrl = `${origin}/r/${qr.slug}`;
 
@@ -493,32 +690,48 @@ export default function DashboardPage() {
                 <div className="qr-card-top">
                   <div className="qr-preview-box">
                     {previewImg ? (
-                      <img
-                        src={previewImg}
-                        alt={qr.title}
-                        className="qr-preview-img"
-                      />
+                      <img src={previewImg} alt={qr.title} className="qr-preview-img" />
                     ) : (
                       <div style={{ width: 90, height: 90, background: '#f1f5f9' }} />
                     )}
                   </div>
 
                   <div className="qr-info-box">
-                    <span
-                      className={`qr-status-pill ${
-                        qr.isActive ? 'status-active' : 'status-paused'
-                      }`}
-                    >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                       <span
-                        style={{
-                          width: 6,
-                          height: 6,
-                          borderRadius: '50%',
-                          background: qr.isActive ? '#10b981' : '#f59e0b'
-                        }}
-                      />
-                      {qr.isActive ? 'ACTIVE' : 'PAUSED'}
-                    </span>
+                        className={`qr-status-pill ${
+                          qr.isActive ? 'status-active' : 'status-paused'
+                        }`}
+                      >
+                        <span
+                          style={{
+                            width: 6,
+                            height: 6,
+                            borderRadius: '50%',
+                            background: qr.isActive ? '#10b981' : '#f59e0b',
+                          }}
+                        />
+                        {qr.isActive ? 'ACTIVE' : 'PAUSED'}
+                      </span>
+
+                      {/* Profile Creator Badge (Admin View) */}
+                      {currentUser?.role === 'admin' && qr.createdByName && (
+                        <span
+                          style={{
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            color: '#94a3b8',
+                            background: 'rgba(255, 255, 255, 0.05)',
+                            padding: '2px 8px',
+                            borderRadius: '6px',
+                            border: '1px solid rgba(255, 255, 255, 0.08)',
+                          }}
+                        >
+                          👤 {qr.createdByName}
+                        </span>
+                      )}
+                    </div>
+
                     <h3 className="qr-card-title" title={qr.title}>
                       {qr.title}
                     </h3>
@@ -633,7 +846,7 @@ export default function DashboardPage() {
       {/* CREATE QR CODE MODAL */}
       {isCreateModalOpen && (
         <div className="modal-overlay" onClick={() => setIsCreateModalOpen(false)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Create Dynamic QR Code</h2>
               <button
@@ -655,7 +868,7 @@ export default function DashboardPage() {
                       className="form-input"
                       placeholder="e.g. Sales Rep Specials (John Doe)"
                       value={newTitle}
-                      onChange={e => setNewTitle(e.target.value)}
+                      onChange={(e) => setNewTitle(e.target.value)}
                       required
                     />
                   </div>
@@ -667,7 +880,7 @@ export default function DashboardPage() {
                       className="form-input"
                       placeholder="https://yourwebsite.com/specials/"
                       value={newDestinationUrl}
-                      onChange={e => setNewDestinationUrl(e.target.value)}
+                      onChange={(e) => setNewDestinationUrl(e.target.value)}
                       required
                     />
                     <p className="form-help">
@@ -682,15 +895,16 @@ export default function DashboardPage() {
                       className="form-input"
                       placeholder="e.g. rep-specials or card-john"
                       value={newSlug}
-                      onChange={e =>
-                        setNewSlug(
-                          e.target.value.toLowerCase().replace(/[^a-z0-9-_]/g, '-')
-                        )
+                      onChange={(e) =>
+                        setNewSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-_]/g, '-'))
                       }
                       required
                     />
                     <p className="form-help">
-                      Redirect URL: <code>{origin || 'https://domain.vercel.app'}/r/{newSlug || 'your-slug'}</code>
+                      Redirect URL:{' '}
+                      <code>
+                        {origin || 'https://domain.vercel.app'}/r/{newSlug || 'your-slug'}
+                      </code>
                     </p>
                   </div>
 
@@ -702,7 +916,7 @@ export default function DashboardPage() {
                         style={{ height: '42px', padding: '2px', cursor: 'pointer' }}
                         className="form-input"
                         value={newColorDark}
-                        onChange={e => setNewColorDark(e.target.value)}
+                        onChange={(e) => setNewColorDark(e.target.value)}
                       />
                     </div>
                     <div className="form-group">
@@ -712,7 +926,7 @@ export default function DashboardPage() {
                         style={{ height: '42px', padding: '2px', cursor: 'pointer' }}
                         className="form-input"
                         value={newColorLight}
-                        onChange={e => setNewColorLight(e.target.value)}
+                        onChange={(e) => setNewColorLight(e.target.value)}
                       />
                     </div>
                   </div>
@@ -724,7 +938,7 @@ export default function DashboardPage() {
                       className="form-input"
                       placeholder="e.g. Printed on 500 business cards in Oct 2026"
                       value={newNotes}
-                      onChange={e => setNewNotes(e.target.value)}
+                      onChange={(e) => setNewNotes(e.target.value)}
                     />
                   </div>
                 </div>
@@ -737,7 +951,7 @@ export default function DashboardPage() {
                     margin: '0 auto',
                     display: 'flex',
                     flexDirection: 'column',
-                    alignItems: 'center'
+                    alignItems: 'center',
                   }}
                 >
                   <span
@@ -745,7 +959,7 @@ export default function DashboardPage() {
                       fontSize: '12px',
                       fontWeight: 700,
                       color: '#94a3b8',
-                      marginBottom: '10px'
+                      marginBottom: '10px',
                     }}
                   >
                     LIVE QR PREVIEW
@@ -756,7 +970,7 @@ export default function DashboardPage() {
                       padding: '12px',
                       borderRadius: '16px',
                       boxShadow: '0 8px 20px rgba(0,0,0,0.4)',
-                      marginBottom: '14px'
+                      marginBottom: '14px',
                     }}
                   >
                     {createPreviewUrl && (
@@ -780,7 +994,7 @@ export default function DashboardPage() {
                   gap: '12px',
                   marginTop: '24px',
                   paddingTop: '18px',
-                  borderTop: '1px solid var(--card-border)'
+                  borderTop: '1px solid var(--card-border)',
                 }}
               >
                 <button
@@ -800,13 +1014,103 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {/* ADMIN PROFILES MANAGEMENT MODAL */}
+      {isProfilesModalOpen && (
+        <div className="modal-overlay" onClick={() => setIsProfilesModalOpen(false)}>
+          <div className="modal-content modal-lg" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Users size={24} color="#10b981" />
+                <div>
+                  <h2>Registered User & Sales Rep Profiles</h2>
+                  <p style={{ fontSize: '13px', color: '#94a3b8', marginTop: '2px' }}>
+                    Users can sign up and manage their own QR codes. As Admin, you have full access to all profiles.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn-close-modal"
+                onClick={() => setIsProfilesModalOpen(false)}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ marginTop: '16px' }}>
+              <div className="scans-table-wrap">
+                <table className="scans-table">
+                  <thead>
+                    <tr>
+                      <th>Profile Name</th>
+                      <th>Username</th>
+                      <th>Role</th>
+                      <th>Created Date</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {usersList.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} style={{ textAlign: 'center', padding: '30px' }}>
+                          No additional profiles registered yet.
+                        </td>
+                      </tr>
+                    ) : (
+                      usersList.map((u) => (
+                        <tr key={u.id}>
+                          <td>
+                            <strong>{u.name}</strong>
+                          </td>
+                          <td>
+                            <code>{u.username}</code>
+                          </td>
+                          <td>
+                            <span
+                              style={{
+                                padding: '3px 8px',
+                                borderRadius: '8px',
+                                fontSize: '11px',
+                                fontWeight: 700,
+                                background:
+                                  u.role === 'admin'
+                                    ? 'rgba(16, 185, 129, 0.15)'
+                                    : 'rgba(59, 130, 246, 0.15)',
+                                color: u.role === 'admin' ? '#34d399' : '#60a5fa',
+                              }}
+                            >
+                              {u.role.toUpperCase()}
+                            </span>
+                          </td>
+                          <td>{new Date(u.createdAt).toLocaleDateString()}</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="btn-card-action"
+                              style={{ fontSize: '12px', padding: '4px 10px' }}
+                              onClick={() => {
+                                handleFilterUser(u.id);
+                                setIsProfilesModalOpen(false);
+                              }}
+                            >
+                              <span>View QR Codes</span>
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* DETAILED STATS MODAL */}
       {isStatsModalOpen && selectedQRStats && (
         <div className="modal-overlay" onClick={() => setIsStatsModalOpen(false)}>
-          <div
-            className="modal-content modal-lg"
-            onClick={e => e.stopPropagation()}
-          >
+          <div className="modal-content modal-lg" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <div>
                 <h2>Scan Analytics & Statistics</h2>
@@ -827,9 +1131,7 @@ export default function DashboardPage() {
             <div className="analytics-hero">
               <div className="analytics-stat-box">
                 <div className="analytics-stat-title">Total Scans</div>
-                <div className="analytics-stat-val">
-                  {selectedQRStats.stats.total}
-                </div>
+                <div className="analytics-stat-val">{selectedQRStats.stats.total}</div>
               </div>
 
               <div className="analytics-stat-box">
@@ -855,7 +1157,7 @@ export default function DashboardPage() {
                     color: '#38bdf8',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap'
+                    whiteSpace: 'nowrap',
                   }}
                 >
                   <a
@@ -878,7 +1180,7 @@ export default function DashboardPage() {
                   fontWeight: 700,
                   color: '#cbd5e1',
                   textTransform: 'uppercase',
-                  letterSpacing: '0.5px'
+                  letterSpacing: '0.5px',
                 }}
               >
                 Device Breakdown
@@ -896,18 +1198,9 @@ export default function DashboardPage() {
                 return (
                   <>
                     <div className="breakdown-bar">
-                      <div
-                        className="bar-segment bar-mobile"
-                        style={{ width: `${mobPct}%` }}
-                      />
-                      <div
-                        className="bar-segment bar-desktop"
-                        style={{ width: `${dskPct}%` }}
-                      />
-                      <div
-                        className="bar-segment bar-tablet"
-                        style={{ width: `${tabPct}%` }}
-                      />
+                      <div className="bar-segment bar-mobile" style={{ width: `${mobPct}%` }} />
+                      <div className="bar-segment bar-desktop" style={{ width: `${dskPct}%` }} />
+                      <div className="bar-segment bar-tablet" style={{ width: `${tabPct}%` }} />
                     </div>
                     <div className="breakdown-legend">
                       <div className="legend-item">
@@ -935,7 +1228,7 @@ export default function DashboardPage() {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  marginBottom: '12px'
+                  marginBottom: '12px',
                 }}
               >
                 <span
@@ -944,7 +1237,7 @@ export default function DashboardPage() {
                     fontWeight: 700,
                     color: '#cbd5e1',
                     textTransform: 'uppercase',
-                    letterSpacing: '0.5px'
+                    letterSpacing: '0.5px',
                   }}
                 >
                   Recent Scan Activity Log
@@ -968,15 +1261,12 @@ export default function DashboardPage() {
                   <tbody>
                     {selectedQRStats.recentScans.length === 0 ? (
                       <tr>
-                        <td
-                          colSpan={5}
-                          style={{ textAlign: 'center', padding: '30px' }}
-                        >
+                        <td colSpan={5} style={{ textAlign: 'center', padding: '30px' }}>
                           No scans logged yet. Test by scanning your QR code!
                         </td>
                       </tr>
                     ) : (
-                      selectedQRStats.recentScans.slice(0, 15).map(scan => (
+                      selectedQRStats.recentScans.slice(0, 15).map((scan) => (
                         <tr key={scan.id}>
                           <td>{new Date(scan.timestamp).toLocaleString()}</td>
                           <td>
@@ -984,7 +1274,7 @@ export default function DashboardPage() {
                               style={{
                                 textTransform: 'capitalize',
                                 fontWeight: 600,
-                                color: '#fff'
+                                color: '#fff',
                               }}
                             >
                               {scan.deviceType}
@@ -992,7 +1282,9 @@ export default function DashboardPage() {
                             &bull; {scan.os}
                           </td>
                           <td>{scan.browser}</td>
-                          <td>{scan.city}, {scan.country}</td>
+                          <td>
+                            {scan.city}, {scan.country}
+                          </td>
                           <td>{scan.referer}</td>
                         </tr>
                       ))
@@ -1008,7 +1300,7 @@ export default function DashboardPage() {
       {/* EDIT DESTINATION URL MODAL */}
       {isEditModalOpen && editingQR && (
         <div className="modal-overlay" onClick={() => setIsEditModalOpen(false)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Edit QR Code Settings</h2>
               <button
@@ -1027,9 +1319,7 @@ export default function DashboardPage() {
                   type="text"
                   className="form-input"
                   value={editingQR.title}
-                  onChange={e =>
-                    setEditingQR({ ...editingQR, title: e.target.value })
-                  }
+                  onChange={(e) => setEditingQR({ ...editingQR, title: e.target.value })}
                   required
                 />
               </div>
@@ -1040,7 +1330,7 @@ export default function DashboardPage() {
                   type="url"
                   className="form-input"
                   value={editingQR.destinationUrl}
-                  onChange={e =>
+                  onChange={(e) =>
                     setEditingQR({ ...editingQR, destinationUrl: e.target.value })
                   }
                   required
@@ -1051,13 +1341,13 @@ export default function DashboardPage() {
               </div>
 
               <div className="form-group">
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                <label
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
+                >
                   <input
                     type="checkbox"
                     checked={editingQR.isActive}
-                    onChange={e =>
-                      setEditingQR({ ...editingQR, isActive: e.target.checked })
-                    }
+                    onChange={(e) => setEditingQR({ ...editingQR, isActive: e.target.checked })}
                     style={{ width: '18px', height: '18px', accentColor: '#10b981' }}
                   />
                   <span>Active & Ready for Scans</span>
@@ -1069,7 +1359,7 @@ export default function DashboardPage() {
                   display: 'flex',
                   justifyContent: 'flex-end',
                   gap: '12px',
-                  marginTop: '24px'
+                  marginTop: '24px',
                 }}
               >
                 <button
@@ -1091,7 +1381,7 @@ export default function DashboardPage() {
       {/* DOWNLOAD MODAL */}
       {isDownloadModalOpen && downloadTargetQR && (
         <div className="modal-overlay" onClick={() => setIsDownloadModalOpen(false)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Download Print-Ready QR Code</h2>
               <button
@@ -1111,7 +1401,7 @@ export default function DashboardPage() {
                   borderRadius: '16px',
                   display: 'inline-block',
                   boxShadow: '0 10px 25px rgba(0,0,0,0.3)',
-                  marginBottom: '16px'
+                  marginBottom: '16px',
                 }}
               >
                 {qrPreviews[downloadTargetQR.id] && (
@@ -1157,7 +1447,7 @@ export default function DashboardPage() {
                 fontSize: '12px',
                 color: '#64748b',
                 textAlign: 'center',
-                marginTop: '16px'
+                marginTop: '16px',
               }}
             >
               Recommended for business cards: PNG or Vector SVG for print shops with zero quality loss.
