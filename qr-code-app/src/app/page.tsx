@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   QrCode,
@@ -24,7 +24,10 @@ import {
   PauseCircle,
   PlayCircle,
   User,
-  Users
+  Users,
+  Upload,
+  RefreshCw,
+  HardDrive
 } from 'lucide-react';
 import { QRCodeItem, QRCodeWithStats, UserProfile } from '@/lib/types';
 import { generateQRDataUrl, generateQRSvg } from '@/lib/qrHelper';
@@ -38,6 +41,7 @@ interface CurrentUser {
 
 export default function DashboardPage() {
   const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [usersList, setUsersList] = useState<UserProfile[]>([]);
   const [selectedUserFilter, setSelectedUserFilter] = useState<string>('all');
@@ -81,6 +85,22 @@ export default function DashboardPage() {
   }, []);
 
   const loadUserAndData = async () => {
+    // 1. Instant recovery from client-side persistent vault
+    if (typeof window !== 'undefined') {
+      try {
+        const cachedVault = localStorage.getItem('qr_hub_permanent_vault');
+        if (cachedVault) {
+          const parsed = JSON.parse(cachedVault);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setQrList(parsed);
+            generatePreviews(parsed);
+          }
+        }
+      } catch (err) {
+        console.warn('Vault cache parse error:', err);
+      }
+    }
+
     try {
       setLoading(true);
       const meRes = await fetch('/api/auth/me');
@@ -114,6 +134,26 @@ export default function DashboardPage() {
   const fetchQRCodes = async (filterUserId?: string) => {
     try {
       setLoading(true);
+
+      // 2. Proactive sync: if client has stored QR codes, push to server to prevent cold-start loss
+      if (typeof window !== 'undefined') {
+        try {
+          const localVault = localStorage.getItem('qr_hub_permanent_vault');
+          if (localVault) {
+            const vaultItems = JSON.parse(localVault);
+            if (Array.isArray(vaultItems) && vaultItems.length > 0) {
+              await fetch('/api/sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ clientQRs: vaultItems }),
+              });
+            }
+          }
+        } catch (err) {
+          // ignore background sync errors
+        }
+      }
+
       const targetFilter = filterUserId !== undefined ? filterUserId : selectedUserFilter;
       const url =
         targetFilter && targetFilter !== 'all'
@@ -125,6 +165,13 @@ export default function DashboardPage() {
       if (data.qrCodes) {
         setQrList(data.qrCodes);
         generatePreviews(data.qrCodes);
+
+        // 3. Keep client-side vault permanently updated
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem('qr_hub_permanent_vault', JSON.stringify(data.qrCodes));
+          } catch (e) {}
+        }
       }
     } catch (err) {
       console.error('Failed to fetch QR codes:', err);
@@ -221,6 +268,22 @@ export default function DashboardPage() {
       showToast(`QR Code "${data.qrCode.title}" created successfully!`);
       setIsCreateModalOpen(false);
       resetCreateForm();
+
+      // Immediately save into persistent local vault to guarantee zero data loss on immediate reload
+      if (typeof window !== 'undefined' && data.qrCode) {
+        try {
+          const cachedRaw = localStorage.getItem('qr_hub_permanent_vault');
+          const currentVault = cachedRaw ? JSON.parse(cachedRaw) : [];
+          const updatedVault = [
+            data.qrCode,
+            ...currentVault.filter((q: QRCodeItem) => q.id !== data.qrCode.id && q.slug !== data.qrCode.slug),
+          ];
+          localStorage.setItem('qr_hub_permanent_vault', JSON.stringify(updatedVault));
+          setQrList(updatedVault);
+          generatePreviews(updatedVault);
+        } catch (e) {}
+      }
+
       fetchQRCodes(selectedUserFilter);
     } catch (err: any) {
       alert(err.message || 'Error creating QR code');
@@ -311,6 +374,48 @@ export default function DashboardPage() {
   const handleExportBackup = () => {
     window.open('/api/backup', '_blank');
     showToast('Database backup downloaded!');
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      showToast('Importing backup file...');
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+
+      const res = await fetch('/api/backup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(parsed),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to import backup file');
+        return;
+      }
+
+      showToast(data.message || 'Backup restored successfully!');
+
+      if (Array.isArray(parsed.qrCodes)) {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('qr_hub_permanent_vault', JSON.stringify(parsed.qrCodes));
+        }
+        setQrList(parsed.qrCodes);
+        generatePreviews(parsed.qrCodes);
+      }
+      fetchQRCodes('all');
+    } catch (err: any) {
+      alert('Error parsing JSON backup file: ' + err.message);
+    } finally {
+      if (e.target) e.target.value = '';
+    }
   };
 
   // High-Res PNG & Vector SVG Downloads
@@ -434,18 +539,35 @@ export default function DashboardPage() {
             </button>
           )}
 
-          {/* Admin Database Backup Button */}
-          {currentUser?.role === 'admin' && (
-            <button
-              type="button"
-              className="btn-secondary"
-              title="Download full JSON database backup"
-              onClick={handleExportBackup}
-            >
-              <Database size={15} />
-              <span>Export Backup</span>
-            </button>
-          )}
+          {/* Hidden File Input for Backup Restore */}
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileSelected}
+            accept=".json"
+            style={{ display: 'none' }}
+          />
+
+          {/* Database Backup & Restore Buttons */}
+          <button
+            type="button"
+            className="btn-secondary"
+            title="Download full JSON database backup of all QR codes"
+            onClick={handleExportBackup}
+          >
+            <Database size={15} />
+            <span>Export Backup</span>
+          </button>
+
+          <button
+            type="button"
+            className="btn-secondary"
+            title="Restore or import client QR codes from a JSON backup file"
+            onClick={handleImportClick}
+          >
+            <Upload size={15} />
+            <span>Restore Backup</span>
+          </button>
 
           <button
             type="button"

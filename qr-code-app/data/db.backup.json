@@ -1,0 +1,53 @@
+{
+  "users": [
+    {
+      "id": "usr_admin",
+      "username": "admin",
+      "name": "Administrator",
+      "password": "Qwerty123!@#",
+      "role": "admin",
+      "createdAt": "2026-10-14T21:59:08.119Z"
+    },
+    {
+      "id": "usr_rep_1",
+      "username": "mikerep",
+      "name": "Mike Stevens (Rep)",
+      "password": "Rep123!",
+      "role": "user",
+      "createdAt": "2026-10-14T21:59:08.119Z"
+    }
+  ],
+  "qrCodes": [
+    {
+      "id": "qr_specials_1",
+      "title": "Sales Rep Deals & Specials",
+      "slug": "rep-specials",
+      "destinationUrl": "https://example.com/specials/",
+      "createdAt": "2026-10-14T21:59:08.119Z",
+      "updatedAt": "2026-10-16T21:59:08.119Z",
+      "isActive": true,
+      "notes": "Printed on sales rep business cards and table tents",
+      "colorDark": "#0f172a",
+      "colorLight": "#ffffff",
+      "totalScans": 42,
+      "createdByUserId": "usr_rep_1",
+      "createdByName": "Mike Stevens (Rep)"
+    },
+    {
+      "id": "qr_main_site",
+      "title": "Company Main Homepage",
+      "slug": "main-site",
+      "destinationUrl": "https://example.com",
+      "createdAt": "2026-10-14T21:59:08.119Z",
+      "updatedAt": "2026-10-16T21:59:08.119Z",
+      "isActive": true,
+      "notes": "General marketing banner QR",
+      "colorDark": "#047857",
+      "colorLight": "#ffffff",
+      "totalScans": 19,
+      "createdByUserId": "usr_admin",
+      "createdByName": "Administrator"
+    }
+  ],
+  "scans": []
+}

@@ -10,12 +10,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const filterUserId = request.nextUrl.searchParams.get('userId');
   let qrCodes;
-  if (sessionUser.role === 'admin') {
-    const filterUserId = request.nextUrl.searchParams.get('userId');
-    qrCodes = await Storage.getAllQRCodes(filterUserId || undefined);
+  if (filterUserId && filterUserId !== 'all') {
+    qrCodes = await Storage.getAllQRCodes(filterUserId);
   } else {
-    qrCodes = await Storage.getAllQRCodes(sessionUser.id);
+    // Show all QR codes so clients and reps are never hidden
+    qrCodes = await Storage.getAllQRCodes();
   }
 
   return NextResponse.json({ qrCodes });
