@@ -289,21 +289,6 @@ export default function LoginPage() {
               <span>{loading ? 'Authenticating...' : 'Sign In to Dashboard'}</span>
               <ArrowRight size={16} />
             </button>
-
-            <div
-              style={{
-                marginTop: '16px',
-                padding: '10px 12px',
-                background: 'rgba(255, 255, 255, 0.03)',
-                borderRadius: '10px',
-                border: '1px solid rgba(255, 255, 255, 0.05)',
-                fontSize: '11.5px',
-                color: '#64748b',
-                lineHeight: 1.5,
-              }}
-            >
-              🔑 <strong>Admin credentials:</strong> <code style={{ color: '#94a3b8' }}>Admin</code> / <code style={{ color: '#94a3b8' }}>Qwerty123!@#</code>
-            </div>
           </form>
         )}
 
