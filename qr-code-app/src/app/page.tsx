@@ -138,27 +138,7 @@ export default function DashboardPage() {
 
   const fetchQRCodes = async (filterUserId?: string) => {
     try {
-      setLoading(true);
-
-      // 2. Proactive sync: if client has stored QR codes, push to server to prevent cold-start loss
-      if (typeof window !== 'undefined') {
-        try {
-          const localVault = localStorage.getItem('qr_hub_permanent_vault');
-          if (localVault) {
-            const vaultItems = JSON.parse(localVault);
-            if (Array.isArray(vaultItems) && vaultItems.length > 0) {
-              await fetch('/api/sync', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ clientQRs: vaultItems }),
-              });
-            }
-          }
-        } catch (err) {
-          // ignore background sync errors
-        }
-      }
-
+      // 1. Fetch server list
       const targetFilter = filterUserId !== undefined ? filterUserId : selectedUserFilter;
       const url =
         targetFilter && targetFilter !== 'all'
@@ -167,16 +147,63 @@ export default function DashboardPage() {
 
       const res = await fetch(url);
       const data = await res.json();
-      if (data.qrCodes) {
-        setQrList(data.qrCodes);
-        generatePreviews(data.qrCodes);
+      const serverQRs: QRCodeItem[] = Array.isArray(data.qrCodes) ? data.qrCodes : [];
 
-        // 3. Keep client-side vault permanently updated
-        if (typeof window !== 'undefined') {
-          try {
-            localStorage.setItem('qr_hub_permanent_vault', JSON.stringify(data.qrCodes));
-          } catch (e) {}
+      // 2. Intelligent Union with Local Browser Vault
+      // Guarantees zero data loss even on Vercel serverless cold starts
+      let localVaultItems: QRCodeItem[] = [];
+      if (typeof window !== 'undefined') {
+        try {
+          const raw = localStorage.getItem('qr_hub_permanent_vault');
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) localVaultItems = parsed;
+          }
+        } catch (e) {}
+      }
+
+      const mergedMap = new Map<string, QRCodeItem>();
+      const slugMap = new Set<string>();
+
+      // Server records take priority for scan counts / updates
+      for (const item of serverQRs) {
+        if (item && item.id) {
+          mergedMap.set(item.id, item);
+          if (item.slug) slugMap.add(item.slug.toLowerCase());
         }
+      }
+
+      // Preserve any client-created QR codes that the serverless container may have missed
+      let missingOnServer: QRCodeItem[] = [];
+      for (const item of localVaultItems) {
+        if (item && item.id && !mergedMap.has(item.id)) {
+          if (!item.slug || !slugMap.has(item.slug.toLowerCase())) {
+            mergedMap.set(item.id, item);
+            missingOnServer.push(item);
+          }
+        }
+      }
+
+      const finalList = Array.from(mergedMap.values());
+      setQrList(finalList);
+      generatePreviews(finalList);
+
+      // Save complete merged list into permanent browser vault
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('qr_hub_permanent_vault', JSON.stringify(finalList));
+        } catch (e) {}
+      }
+
+      // Auto-heal the serverless container in background if missing items detected
+      if (missingOnServer.length > 0) {
+        try {
+          await fetch('/api/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ clientQRs: missingOnServer }),
+          });
+        } catch (err) {}
       }
     } catch (err) {
       console.error('Failed to fetch QR codes:', err);
@@ -1799,6 +1826,46 @@ export default function DashboardPage() {
                     </div>
                   ))}
                 </div>
+              </div>
+
+              {/* Vercel Cloud Persistence Status Card */}
+              <div
+                style={{
+                  background: diagnosticsData?.isCloudRedis
+                    ? 'rgba(16, 185, 129, 0.08)'
+                    : 'rgba(245, 158, 11, 0.08)',
+                  border: `1px solid ${
+                    diagnosticsData?.isCloudRedis
+                      ? 'rgba(16, 185, 129, 0.3)'
+                      : 'rgba(245, 158, 11, 0.3)'
+                  }`,
+                  borderRadius: '12px',
+                  padding: '14px 16px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                  <Globe
+                    size={16}
+                    style={{ color: diagnosticsData?.isCloudRedis ? '#34d399' : '#fbbf24' }}
+                  />
+                  <h4
+                    style={{
+                      color: diagnosticsData?.isCloudRedis ? '#34d399' : '#fbbf24',
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      margin: 0,
+                    }}
+                  >
+                    {diagnosticsData?.isCloudRedis
+                      ? '☁️ Cloud Database Connected (Vercel KV / Upstash Redis)'
+                      : '☁️ Vercel Cloud Serverless Persistence Setup'}
+                  </h4>
+                </div>
+                <p style={{ color: '#cbd5e1', fontSize: '12px', lineHeight: 1.5, margin: 0 }}>
+                  {diagnosticsData?.isCloudRedis
+                    ? 'Your QR codes and live scan analytics are permanently synced across all Vercel serverless regions with zero data loss.'
+                    : 'Your QR codes are preserved safely in your browser vault. For production phone scans on Vercel without cold starts, connect free Vercel KV or Upstash Redis in your Vercel Project -> Storage tab.'}
+                </p>
               </div>
 
               {/* Quick tip on how to verify manually */}

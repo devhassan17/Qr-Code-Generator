@@ -14,9 +14,20 @@ const globalForDb = globalThis as unknown as {
   __qrDbCache?: DatabaseSchema;
 };
 
-// Check for Vercel KV / Upstash Redis environment variables
-const redisUrl = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-const redisToken = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+// Check for Vercel KV / Upstash Redis environment variables (supports default, KV, and STORAGE prefixes)
+const redisUrl =
+  process.env.STORAGE_REST_API_URL ||
+  process.env.KV_REST_API_URL ||
+  process.env.UPSTASH_REDIS_REST_URL ||
+  process.env.REDIS_URL ||
+  process.env.KV_URL ||
+  process.env.STORAGE_URL;
+const redisToken =
+  process.env.STORAGE_REST_API_TOKEN ||
+  process.env.KV_REST_API_TOKEN ||
+  process.env.UPSTASH_REDIS_REST_TOKEN ||
+  process.env.REDIS_TOKEN ||
+  process.env.STORAGE_TOKEN;
 
 const redis = redisUrl && redisToken ? new Redis({ url: redisUrl, token: redisToken }) : null;
 const REDIS_DB_KEY = 'qr_hub_database_v1';
@@ -604,6 +615,7 @@ export const Storage = {
       totalUsers: db.users.length,
       totalScans: db.scans.length,
       isCloudRedis: redis !== null,
+      isVercel: process.env.VERCEL === '1' || Boolean(process.env.NEXT_PUBLIC_VERCEL_ENV),
       locations,
     };
   },
