@@ -19,6 +19,21 @@
   ],
   "qrCodes": [
     {
+      "title": "Apex Solutions Client Card",
+      "slug": "apex-solutions",
+      "destinationUrl": "https://example.com/clients/apex",
+      "colorDark": "#0f172a",
+      "colorLight": "#ffffff",
+      "notes": "VIP Client QR",
+      "isActive": true,
+      "createdByUserId": "usr_admin",
+      "createdByName": "Administrator",
+      "id": "qr_1792189548614_j66iz",
+      "createdAt": "2026-10-16T22:25:48.614Z",
+      "updatedAt": "2026-10-16T22:25:48.614Z",
+      "totalScans": 0
+    },
+    {
       "id": "qr_specials_1",
       "title": "Sales Rep Deals & Specials",
       "slug": "rep-specials",

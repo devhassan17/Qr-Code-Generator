@@ -29,21 +29,24 @@ function getStorageDirectories(): string[] {
   const dirs: string[] = [];
 
   try {
-    // 1. Current working directory /data
-    dirs.push(path.join(process.cwd(), 'data'));
+    const cwd = process.cwd();
+    const isInsideApp = path.basename(cwd) === 'qr-code-app';
 
-    // 2. Subfolder /data if cwd is root
-    dirs.push(path.join(process.cwd(), 'qr-code-app', 'data'));
+    // 1. App internal data directory
+    if (isInsideApp) {
+      dirs.push(path.join(cwd, 'data'));
+      dirs.push(path.join(path.dirname(cwd), 'data'));
+    } else {
+      dirs.push(path.join(cwd, 'qr-code-app', 'data'));
+      dirs.push(path.join(cwd, 'data'));
+    }
 
-    // 3. Parent /data if cwd is qr-code-app
-    dirs.push(path.join(process.cwd(), '..', 'data'));
-
-    // 4. User home directory (.qr_code_hub_data) - 100% persistent on Mac/Linux/Windows
+    // 2. User home directory (.qr_code_hub_data) - 100% persistent on Mac/Linux/Windows
     if (process.env.HOME || process.env.USERPROFILE) {
       dirs.push(path.join(process.env.HOME || process.env.USERPROFILE || '', '.qr_code_hub_data'));
     }
 
-    // 5. Serverless /tmp fallback
+    // 3. Serverless /tmp fallback
     dirs.push('/tmp/qr_analytics_data');
   } catch (err) {
     dirs.push('/tmp/qr_analytics_data');
@@ -552,5 +555,56 @@ export const Storage = {
     });
     await saveDatabase(merged);
     return true;
+  },
+
+  async getStorageDiagnostics(): Promise<{
+    totalQRCodes: number;
+    totalUsers: number;
+    totalScans: number;
+    isCloudRedis: boolean;
+    locations: {
+      path: string;
+      exists: boolean;
+      sizeBytes?: number;
+      lastModified?: string;
+      qrCount?: number;
+    }[];
+  }> {
+    const db = await loadDatabase();
+    const dirs = getStorageDirectories();
+    const locations: any[] = [];
+
+    for (const dir of dirs) {
+      const mainFile = path.join(dir, 'db.json');
+      const backupFile = path.join(dir, 'db.backup.json');
+
+      for (const f of [mainFile, backupFile]) {
+        if (fs.existsSync(f)) {
+          try {
+            const stat = fs.statSync(f);
+            const content = JSON.parse(fs.readFileSync(f, 'utf-8'));
+            locations.push({
+              path: f,
+              exists: true,
+              sizeBytes: stat.size,
+              lastModified: stat.mtime.toISOString(),
+              qrCount: Array.isArray(content.qrCodes) ? content.qrCodes.length : 0,
+            });
+          } catch {
+            locations.push({ path: f, exists: true, error: 'Unreadable' });
+          }
+        } else {
+          locations.push({ path: f, exists: false });
+        }
+      }
+    }
+
+    return {
+      totalQRCodes: db.qrCodes.length,
+      totalUsers: db.users.length,
+      totalScans: db.scans.length,
+      isCloudRedis: redis !== null,
+      locations,
+    };
   },
 };
