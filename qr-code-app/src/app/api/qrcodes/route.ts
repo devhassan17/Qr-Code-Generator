@@ -10,15 +10,18 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const filterUserId = request.nextUrl.searchParams.get('userId');
-  let qrCodes;
-  if (filterUserId && filterUserId !== 'all') {
-    qrCodes = await Storage.getAllQRCodes(filterUserId);
+  let filterUserId: string | undefined = undefined;
+  if (sessionUser.role === 'admin') {
+    const requestedUser = request.nextUrl.searchParams.get('userId');
+    if (requestedUser && requestedUser !== 'all') {
+      filterUserId = requestedUser;
+    }
   } else {
-    // Show all QR codes so clients and reps are never hidden
-    qrCodes = await Storage.getAllQRCodes();
+    // Non-admin users are strictly restricted to only seeing their own QR codes
+    filterUserId = sessionUser.id;
   }
 
+  const qrCodes = await Storage.getAllQRCodes(filterUserId);
   return NextResponse.json({ qrCodes });
 }
 
@@ -30,7 +33,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { title, slug, destinationUrl, colorDark, colorLight, notes, isActive } = body;
+    const { title, slug, destinationUrl, colorDark, colorLight, notes, isActive, assignedUserId } = body;
 
     if (!title || !slug || !destinationUrl) {
       return NextResponse.json(
@@ -54,6 +57,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    let creatorId = sessionUser.id;
+    let creatorName = sessionUser.name;
+
+    // Only administrators can assign QR codes to other user profiles
+    if (sessionUser.role === 'admin' && assignedUserId) {
+      const assignedUser = await Storage.getUserById(assignedUserId);
+      if (assignedUser) {
+        creatorId = assignedUser.id;
+        creatorName = assignedUser.name;
+      }
+    }
+
     const created = await Storage.createQRCode({
       title: title.trim(),
       slug: cleanSlug,
@@ -62,8 +77,8 @@ export async function POST(request: NextRequest) {
       colorLight: colorLight || '#ffffff',
       notes: notes || '',
       isActive: isActive !== false,
-      createdByUserId: sessionUser.id,
-      createdByName: sessionUser.name,
+      createdByUserId: creatorId,
+      createdByName: creatorName,
     });
 
     return NextResponse.json({ qrCode: created }, { status: 201 });

@@ -90,32 +90,41 @@ export default function DashboardPage() {
   }, []);
 
   const loadUserAndData = async () => {
-    // 1. Instant recovery from client-side persistent vault
-    if (typeof window !== 'undefined') {
-      try {
-        const cachedVault = localStorage.getItem('qr_hub_permanent_vault');
-        if (cachedVault) {
-          const parsed = JSON.parse(cachedVault);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setQrList(parsed);
-            generatePreviews(parsed);
-          }
-        }
-      } catch (err) {
-        console.warn('Vault cache parse error:', err);
-      }
-    }
-
     try {
       setLoading(true);
       const meRes = await fetch('/api/auth/me');
       if (meRes.ok) {
         const meData = await meRes.json();
-        if (meData.user) {
-          setCurrentUser(meData.user);
-          setAssignedUserId(meData.user.id);
+        const user = meData.user;
+        if (user) {
+          setCurrentUser(user);
+          setAssignedUserId(user.id);
 
-          if (meData.user.role === 'admin') {
+          const defaultFilter = user.role === 'admin' ? 'all' : user.id;
+          setSelectedUserFilter(defaultFilter);
+
+          // Restore from user-scoped vault to avoid seeing other users' cached QR codes
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.removeItem('qr_hub_permanent_vault');
+              const userVaultKey = `qr_hub_vault_${user.id}`;
+              const cachedVault = localStorage.getItem(userVaultKey);
+              if (cachedVault) {
+                const parsed = JSON.parse(cachedVault);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                  const safeCached = user.role === 'admin'
+                    ? parsed
+                    : parsed.filter((q: QRCodeItem) => q.createdByUserId === user.id);
+                  setQrList(safeCached);
+                  generatePreviews(safeCached);
+                }
+              }
+            } catch (err) {
+              console.warn('Vault cache parse error:', err);
+            }
+          }
+
+          if (user.role === 'admin') {
             try {
               const usersRes = await fetch('/api/auth/users');
               if (usersRes.ok) {
@@ -128,18 +137,31 @@ export default function DashboardPage() {
               console.error('Failed to load user profiles:', err);
             }
           }
+
+          await fetchQRCodes(defaultFilter, user);
+        } else {
+          router.push('/login');
         }
+      } else {
+        router.push('/login');
       }
     } catch (err) {
       console.error('Failed to load user session:', err);
+    } finally {
+      setLoading(false);
     }
-    fetchQRCodes('all');
   };
 
-  const fetchQRCodes = async (filterUserId?: string) => {
+  const fetchQRCodes = async (filterUserId?: string, userOverride?: CurrentUser | null) => {
     try {
-      // 1. Fetch server list
-      const targetFilter = filterUserId !== undefined ? filterUserId : selectedUserFilter;
+      const activeUser = userOverride !== undefined ? userOverride : currentUser;
+      const isAdmin = activeUser?.role === 'admin';
+
+      // Non-admins can only ever request their own QR codes
+      const targetFilter = isAdmin
+        ? (filterUserId !== undefined ? filterUserId : selectedUserFilter)
+        : (activeUser ? activeUser.id : '');
+
       const url =
         targetFilter && targetFilter !== 'all'
           ? `/api/qrcodes?userId=${encodeURIComponent(targetFilter)}`
@@ -147,17 +169,26 @@ export default function DashboardPage() {
 
       const res = await fetch(url);
       const data = await res.json();
-      const serverQRs: QRCodeItem[] = Array.isArray(data.qrCodes) ? data.qrCodes : [];
+      let serverQRs: QRCodeItem[] = Array.isArray(data.qrCodes) ? data.qrCodes : [];
 
-      // 2. Intelligent Union with Local Browser Vault
-      // Guarantees zero data loss even on Vercel serverless cold starts
+      // Extra client-side security guarantee: non-admins only receive their own QR codes
+      if (!isAdmin && activeUser) {
+        serverQRs = serverQRs.filter((item) => item.createdByUserId === activeUser.id);
+      }
+
+      // User-scoped Local Browser Vault
+      const vaultKey = activeUser ? `qr_hub_vault_${activeUser.id}` : 'qr_hub_vault_session';
       let localVaultItems: QRCodeItem[] = [];
       if (typeof window !== 'undefined') {
         try {
-          const raw = localStorage.getItem('qr_hub_permanent_vault');
+          const raw = localStorage.getItem(vaultKey);
           if (raw) {
             const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) localVaultItems = parsed;
+            if (Array.isArray(parsed)) {
+              localVaultItems = isAdmin
+                ? parsed
+                : parsed.filter((item) => item.createdByUserId === activeUser?.id);
+            }
           }
         } catch (e) {}
       }
@@ -168,18 +199,22 @@ export default function DashboardPage() {
       // Server records take priority for scan counts / updates
       for (const item of serverQRs) {
         if (item && item.id) {
-          mergedMap.set(item.id, item);
-          if (item.slug) slugMap.add(item.slug.toLowerCase());
+          if (isAdmin || item.createdByUserId === activeUser?.id) {
+            mergedMap.set(item.id, item);
+            if (item.slug) slugMap.add(item.slug.toLowerCase());
+          }
         }
       }
 
-      // Preserve any client-created QR codes that the serverless container may have missed
+      // Preserve client-created QR codes only for the authorized user
       let missingOnServer: QRCodeItem[] = [];
       for (const item of localVaultItems) {
         if (item && item.id && !mergedMap.has(item.id)) {
-          if (!item.slug || !slugMap.has(item.slug.toLowerCase())) {
-            mergedMap.set(item.id, item);
-            missingOnServer.push(item);
+          if (isAdmin || item.createdByUserId === activeUser?.id) {
+            if (!item.slug || !slugMap.has(item.slug.toLowerCase())) {
+              mergedMap.set(item.id, item);
+              missingOnServer.push(item);
+            }
           }
         }
       }
@@ -188,10 +223,10 @@ export default function DashboardPage() {
       setQrList(finalList);
       generatePreviews(finalList);
 
-      // Save complete merged list into permanent browser vault
+      // Save complete merged list into user-scoped browser vault
       if (typeof window !== 'undefined') {
         try {
-          localStorage.setItem('qr_hub_permanent_vault', JSON.stringify(finalList));
+          localStorage.setItem(vaultKey, JSON.stringify(finalList));
         } catch (e) {}
       }
 
@@ -213,6 +248,7 @@ export default function DashboardPage() {
   };
 
   const handleFilterUser = (userId: string) => {
+    if (currentUser?.role !== 'admin') return;
     setSelectedUserFilter(userId);
     fetchQRCodes(userId);
   };
@@ -278,17 +314,23 @@ export default function DashboardPage() {
 
     try {
       setIsSubmitting(true);
+      const payload: any = {
+        title: newTitle.trim(),
+        slug: newSlug.trim(),
+        destinationUrl: newDestinationUrl.trim(),
+        colorDark: newColorDark,
+        colorLight: newColorLight,
+        notes: newNotes.trim(),
+      };
+
+      if (currentUser?.role === 'admin' && assignedUserId) {
+        payload.assignedUserId = assignedUserId;
+      }
+
       const res = await fetch('/api/qrcodes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: newTitle.trim(),
-          slug: newSlug.trim(),
-          destinationUrl: newDestinationUrl.trim(),
-          colorDark: newColorDark,
-          colorLight: newColorLight,
-          notes: newNotes.trim(),
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
@@ -301,16 +343,17 @@ export default function DashboardPage() {
       setIsCreateModalOpen(false);
       resetCreateForm();
 
-      // Immediately save into persistent local vault to guarantee zero data loss on immediate reload
+      // Immediately save into user-scoped persistent local vault
       if (typeof window !== 'undefined' && data.qrCode) {
         try {
-          const cachedRaw = localStorage.getItem('qr_hub_permanent_vault');
+          const vaultKey = currentUser ? `qr_hub_vault_${currentUser.id}` : 'qr_hub_vault_session';
+          const cachedRaw = localStorage.getItem(vaultKey);
           const currentVault = cachedRaw ? JSON.parse(cachedRaw) : [];
           const updatedVault = [
             data.qrCode,
             ...currentVault.filter((q: QRCodeItem) => q.id !== data.qrCode.id && q.slug !== data.qrCode.slug),
           ];
-          localStorage.setItem('qr_hub_permanent_vault', JSON.stringify(updatedVault));
+          localStorage.setItem(vaultKey, JSON.stringify(updatedVault));
           setQrList(updatedVault);
           generatePreviews(updatedVault);
         } catch (e) {}
@@ -331,6 +374,13 @@ export default function DashboardPage() {
     setNewColorDark('#0f172a');
     setNewColorLight('#ffffff');
     setNewNotes('');
+    if (currentUser) {
+      setAssignedUserId(
+        currentUser.role === 'admin' && selectedUserFilter !== 'all'
+          ? selectedUserFilter
+          : currentUser.id
+      );
+    }
   };
 
   const handleOpenStats = async (qr: QRCodeItem) => {
@@ -395,6 +445,12 @@ export default function DashboardPage() {
 
   const handleLogout = async () => {
     try {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('qr_hub_permanent_vault');
+        if (currentUser) {
+          localStorage.removeItem(`qr_hub_vault_${currentUser.id}`);
+        }
+      }
       await fetch('/api/auth/logout', { method: 'POST' });
       router.push('/login');
       router.refresh();
@@ -437,12 +493,13 @@ export default function DashboardPage() {
 
       if (Array.isArray(parsed.qrCodes)) {
         if (typeof window !== 'undefined') {
-          localStorage.setItem('qr_hub_permanent_vault', JSON.stringify(parsed.qrCodes));
+          const vaultKey = currentUser ? `qr_hub_vault_${currentUser.id}` : 'qr_hub_vault_session';
+          localStorage.setItem(vaultKey, JSON.stringify(parsed.qrCodes));
         }
         setQrList(parsed.qrCodes);
         generatePreviews(parsed.qrCodes);
       }
-      fetchQRCodes('all');
+      fetchQRCodes(currentUser?.role === 'admin' ? 'all' : currentUser?.id);
     } catch (err: any) {
       alert('Error parsing JSON backup file: ' + err.message);
     } finally {
@@ -468,7 +525,8 @@ export default function DashboardPage() {
     setIsVerifying(true);
     setVerifyResult(null);
     try {
-      const cachedVault = localStorage.getItem('qr_hub_permanent_vault');
+      const vaultKey = currentUser ? `qr_hub_vault_${currentUser.id}` : 'qr_hub_vault_session';
+      const cachedVault = localStorage.getItem(vaultKey);
       const vaultCount = cachedVault ? JSON.parse(cachedVault).length : 0;
 
       const res = await fetch('/api/qrcodes');
@@ -531,24 +589,36 @@ export default function DashboardPage() {
 
   // Global calculations
   const totalScansAll = useMemo(() => {
-    return qrList.reduce((acc, curr) => acc + (curr.totalScans || 0), 0);
-  }, [qrList]);
+    let list = qrList;
+    if (currentUser && currentUser.role !== 'admin') {
+      list = list.filter((item) => item.createdByUserId === currentUser.id);
+    }
+    return list.reduce((acc, curr) => acc + (curr.totalScans || 0), 0);
+  }, [qrList, currentUser]);
 
   const activeQRsCount = useMemo(() => {
-    return qrList.filter((q) => q.isActive).length;
-  }, [qrList]);
+    let list = qrList;
+    if (currentUser && currentUser.role !== 'admin') {
+      list = list.filter((item) => item.createdByUserId === currentUser.id);
+    }
+    return list.filter((q) => q.isActive).length;
+  }, [qrList, currentUser]);
 
   const filteredQRs = useMemo(() => {
-    if (!searchQuery.trim()) return qrList;
+    let list = qrList;
+    if (currentUser && currentUser.role !== 'admin') {
+      list = list.filter((item) => item.createdByUserId === currentUser.id);
+    }
+    if (!searchQuery.trim()) return list;
     const q = searchQuery.toLowerCase();
-    return qrList.filter(
+    return list.filter(
       (item) =>
         item.title.toLowerCase().includes(q) ||
         item.slug.toLowerCase().includes(q) ||
         item.destinationUrl.toLowerCase().includes(q) ||
         (item.createdByName && item.createdByName.toLowerCase().includes(q))
     );
-  }, [qrList, searchQuery]);
+  }, [qrList, searchQuery, currentUser]);
 
   return (
     <div className="dashboard-container">
@@ -609,51 +679,55 @@ export default function DashboardPage() {
             </button>
           )}
 
-          {/* Hidden File Input for Backup Restore */}
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileSelected}
-            accept=".json"
-            style={{ display: 'none' }}
-          />
+          {/* Database Backup, Restore & Diagnostics (Admin Only) */}
+          {currentUser?.role === 'admin' && (
+            <>
+              {/* Hidden File Input for Backup Restore */}
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileSelected}
+                accept=".json"
+                style={{ display: 'none' }}
+              />
 
-          {/* Database Backup & Restore Buttons */}
-          <button
-            type="button"
-            className="btn-secondary"
-            title="Download full JSON database backup of all QR codes"
-            onClick={handleExportBackup}
-          >
-            <Database size={15} />
-            <span>Export Backup</span>
-          </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                title="Download full JSON database backup of all QR codes"
+                onClick={handleExportBackup}
+              >
+                <Database size={15} />
+                <span>Export Backup</span>
+              </button>
 
-          <button
-            type="button"
-            className="btn-secondary"
-            title="Restore or import client QR codes from a JSON backup file"
-            onClick={handleImportClick}
-          >
-            <Upload size={15} />
-            <span>Restore Backup</span>
-          </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                title="Restore or import client QR codes from a JSON backup file"
+                onClick={handleImportClick}
+              >
+                <Upload size={15} />
+                <span>Restore Backup</span>
+              </button>
 
-          {/* Storage & Data Health Pill */}
-          <button
-            type="button"
-            className="btn-secondary"
-            style={{
-              borderColor: 'rgba(52, 211, 153, 0.4)',
-              background: 'rgba(16, 185, 129, 0.08)',
-              color: '#34d399',
-            }}
-            title="Check storage health, verify persistence, and simulate reload"
-            onClick={handleOpenDiagnostics}
-          >
-            <CheckCircle2 size={15} />
-            <span>Storage: 100% Safe</span>
-          </button>
+              {/* Storage & Data Health Pill */}
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{
+                  borderColor: 'rgba(52, 211, 153, 0.4)',
+                  background: 'rgba(16, 185, 129, 0.08)',
+                  color: '#34d399',
+                }}
+                title="Check storage health, verify persistence, and simulate reload"
+                onClick={handleOpenDiagnostics}
+              >
+                <CheckCircle2 size={15} />
+                <span>Storage: 100% Safe</span>
+              </button>
+            </>
+          )}
 
           <button
             type="button"
@@ -1069,6 +1143,27 @@ export default function DashboardPage() {
             <form onSubmit={handleCreateSubmit}>
               <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
                 <div style={{ flex: 1, minWidth: '280px' }}>
+                  {currentUser?.role === 'admin' && usersList.length > 0 && (
+                    <div className="form-group">
+                      <label>Assign to Profile (Admin)</label>
+                      <select
+                        className="form-input"
+                        value={assignedUserId}
+                        onChange={(e) => setAssignedUserId(e.target.value)}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        {usersList.map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {u.name} ({u.username})
+                          </option>
+                        ))}
+                      </select>
+                      <p className="form-help">
+                        Choose which user profile owns this QR campaign.
+                      </p>
+                    </div>
+                  )}
+
                   <div className="form-group">
                     <label>Campaign / Rep Title *</label>
                     <input
@@ -1770,7 +1865,7 @@ export default function DashboardPage() {
                         <span>Layer 1: Browser Persistent Vault (localStorage)</span>
                       </div>
                       <div style={{ color: '#64748b', fontSize: '11.5px', marginTop: '2px' }}>
-                        Key: <code>qr_hub_permanent_vault</code> — Instantly caches campaigns in browser memory
+                        Key: <code>qr_hub_vault_[userId]</code> — Scoped per user profile in browser storage
                       </div>
                     </div>
                     <span

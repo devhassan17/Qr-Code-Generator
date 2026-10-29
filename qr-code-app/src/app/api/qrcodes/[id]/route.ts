@@ -20,7 +20,7 @@ export async function GET(
   }
 
   // Non-admins can only view stats for their own QR codes
-  if (sessionUser.role !== 'admin' && qrItem.createdByUserId && qrItem.createdByUserId !== sessionUser.id) {
+  if (sessionUser.role !== 'admin' && qrItem.createdByUserId !== sessionUser.id) {
     return NextResponse.json({ error: 'Forbidden. You do not own this campaign.' }, { status: 403 });
   }
 
@@ -101,12 +101,29 @@ export async function PUT(
       return NextResponse.json({ error: 'QR Code not found' }, { status: 404 });
     }
 
-    if (sessionUser.role !== 'admin' && qrItem.createdByUserId && qrItem.createdByUserId !== sessionUser.id) {
+    if (sessionUser.role !== 'admin' && qrItem.createdByUserId !== sessionUser.id) {
       return NextResponse.json({ error: 'Forbidden. You do not own this campaign.' }, { status: 403 });
     }
 
     const body = await request.json();
-    const updated = await Storage.updateQRCode(params.id, body);
+    const updates: any = {
+      ...(body.title !== undefined ? { title: body.title } : {}),
+      ...(body.destinationUrl !== undefined ? { destinationUrl: body.destinationUrl } : {}),
+      ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
+      ...(body.colorDark !== undefined ? { colorDark: body.colorDark } : {}),
+      ...(body.colorLight !== undefined ? { colorLight: body.colorLight } : {}),
+      ...(body.notes !== undefined ? { notes: body.notes } : {}),
+    };
+
+    if (sessionUser.role === 'admin' && body.assignedUserId) {
+      const assignedUser = await Storage.getUserById(body.assignedUserId);
+      if (assignedUser) {
+        updates.createdByUserId = assignedUser.id;
+        updates.createdByName = assignedUser.name;
+      }
+    }
+
+    const updated = await Storage.updateQRCode(params.id, updates);
     if (!updated) {
       return NextResponse.json({ error: 'QR Code not found' }, { status: 404 });
     }
@@ -130,7 +147,7 @@ export async function DELETE(
     return NextResponse.json({ error: 'QR Code not found' }, { status: 404 });
   }
 
-  if (sessionUser.role !== 'admin' && qrItem.createdByUserId && qrItem.createdByUserId !== sessionUser.id) {
+  if (sessionUser.role !== 'admin' && qrItem.createdByUserId !== sessionUser.id) {
     return NextResponse.json({ error: 'Forbidden. You do not own this campaign.' }, { status: 403 });
   }
 

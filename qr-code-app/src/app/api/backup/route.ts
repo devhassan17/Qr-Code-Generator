@@ -5,6 +5,11 @@ import { getSessionUser } from '@/lib/auth';
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
+  const sessionUser = await getSessionUser();
+  if (!sessionUser || sessionUser.role !== 'admin') {
+    return NextResponse.json({ error: 'Forbidden. Admin access required.' }, { status: 403 });
+  }
+
   const data = await Storage.exportDatabase();
   return new NextResponse(JSON.stringify(data, null, 2), {
     headers: {
@@ -17,8 +22,8 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const sessionUser = await getSessionUser();
-    if (!sessionUser) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!sessionUser || sessionUser.role !== 'admin') {
+      return NextResponse.json({ error: 'Forbidden. Admin access required.' }, { status: 403 });
     }
 
     const body = await request.json();

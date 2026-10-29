@@ -14,7 +14,19 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { clientQRs } = body;
 
-    const mergedQRs = await Storage.syncExternalQRCodes(clientQRs || []);
+    const sanitizedClientQRs = (clientQRs || []).map((qr: any) => {
+      if (sessionUser.role !== 'admin') {
+        return {
+          ...qr,
+          createdByUserId: sessionUser.id,
+          createdByName: sessionUser.name,
+        };
+      }
+      return qr;
+    });
+
+    const forUserId = sessionUser.role === 'admin' ? undefined : sessionUser.id;
+    const mergedQRs = await Storage.syncExternalQRCodes(sanitizedClientQRs, forUserId);
 
     return NextResponse.json({
       success: true,

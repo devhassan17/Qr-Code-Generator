@@ -481,9 +481,9 @@ export const Storage = {
   /**
    * Merge external client vault QR codes to prevent loss on reload / container restarts
    */
-  async syncExternalQRCodes(clientQRs: QRCodeItem[]): Promise<QRCodeItem[]> {
+  async syncExternalQRCodes(clientQRs: QRCodeItem[], forUserId?: string): Promise<QRCodeItem[]> {
     if (!Array.isArray(clientQRs) || clientQRs.length === 0) {
-      return this.getAllQRCodes();
+      return this.getAllQRCodes(forUserId);
     }
 
     const db = await loadDatabase();
@@ -511,7 +511,7 @@ export const Storage = {
       await saveDatabase(db);
     }
 
-    return db.qrCodes;
+    return this.getAllQRCodes(forUserId);
   },
 
   // --- Scans & Analytics ---
@@ -573,6 +573,7 @@ export const Storage = {
     totalUsers: number;
     totalScans: number;
     isCloudRedis: boolean;
+    isVercel?: boolean;
     locations: {
       path: string;
       exists: boolean;

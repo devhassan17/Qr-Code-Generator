@@ -39,6 +39,10 @@ export default function LoginPage() {
         return;
       }
 
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('qr_hub_permanent_vault');
+      }
+
       router.push('/');
       router.refresh();
     } catch {
@@ -68,6 +72,10 @@ export default function LoginPage() {
         setError(data.error || 'Error creating profile');
         setLoading(false);
         return;
+      }
+
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('qr_hub_permanent_vault');
       }
 
       router.push('/');
