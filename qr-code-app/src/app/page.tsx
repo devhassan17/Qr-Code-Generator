@@ -152,20 +152,16 @@ export default function DashboardPage() {
     }
   };
 
-  const fetchQRCodes = async (filterUserId?: string, userOverride?: CurrentUser | null) => {
+  const fetchQRCodes = async (_filterUserId?: string, userOverride?: CurrentUser | null) => {
     try {
       const activeUser = userOverride !== undefined ? userOverride : currentUser;
       const isAdmin = activeUser?.role === 'admin';
 
-      // Non-admins can only ever request their own QR codes
-      const targetFilter = isAdmin
-        ? (filterUserId !== undefined ? filterUserId : selectedUserFilter)
-        : (activeUser ? activeUser.id : '');
-
-      const url =
-        targetFilter && targetFilter !== 'all'
-          ? `/api/qrcodes?userId=${encodeURIComponent(targetFilter)}`
-          : '/api/qrcodes';
+      // Admins load all QR codes into master state; tab clicking filters client-side reactively.
+      // Non-admins can only ever request their own QR codes from the server.
+      const url = isAdmin
+        ? '/api/qrcodes'
+        : `/api/qrcodes?userId=${encodeURIComponent(activeUser?.id || '')}`;
 
       const res = await fetch(url);
       const data = await res.json();
@@ -250,7 +246,6 @@ export default function DashboardPage() {
   const handleFilterUser = (userId: string) => {
     if (currentUser?.role !== 'admin') return;
     setSelectedUserFilter(userId);
-    fetchQRCodes(userId);
   };
 
   const generatePreviews = async (items: QRCodeItem[]) => {
@@ -359,12 +354,17 @@ export default function DashboardPage() {
         } catch (e) {}
       }
 
-      fetchQRCodes(selectedUserFilter);
+      await fetchQRCodes('all');
     } catch (err: any) {
       alert(err.message || 'Error creating QR code');
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleOpenCreateModal = () => {
+    resetCreateForm();
+    setIsCreateModalOpen(true);
   };
 
   const resetCreateForm = () => {
@@ -406,20 +406,35 @@ export default function DashboardPage() {
     if (!editingQR) return;
 
     try {
+      const payload: any = {
+        title: editingQR.title,
+        destinationUrl: editingQR.destinationUrl,
+        isActive: editingQR.isActive,
+      };
+
+      if (currentUser?.role === 'admin' && editingQR.createdByUserId) {
+        payload.assignedUserId = editingQR.createdByUserId;
+      }
+
       const res = await fetch(`/api/qrcodes/${editingQR.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: editingQR.title,
-          destinationUrl: editingQR.destinationUrl,
-          isActive: editingQR.isActive,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (res.ok) {
+        const data = await res.json();
         showToast('QR Code updated successfully!');
         setIsEditModalOpen(false);
-        fetchQRCodes(selectedUserFilter);
+        if (data.qrCode) {
+          setQrList((prev) =>
+            prev.map((q) => (q.id === data.qrCode.id ? data.qrCode : q))
+          );
+        }
+        await fetchQRCodes('all');
+      } else {
+        const errData = await res.json();
+        alert(errData.error || 'Error updating QR code');
       }
     } catch (err) {
       alert('Error updating QR code');
@@ -592,22 +607,28 @@ export default function DashboardPage() {
     let list = qrList;
     if (currentUser && currentUser.role !== 'admin') {
       list = list.filter((item) => item.createdByUserId === currentUser.id);
+    } else if (selectedUserFilter && selectedUserFilter !== 'all') {
+      list = list.filter((item) => item.createdByUserId === selectedUserFilter);
     }
     return list.reduce((acc, curr) => acc + (curr.totalScans || 0), 0);
-  }, [qrList, currentUser]);
+  }, [qrList, currentUser, selectedUserFilter]);
 
   const activeQRsCount = useMemo(() => {
     let list = qrList;
     if (currentUser && currentUser.role !== 'admin') {
       list = list.filter((item) => item.createdByUserId === currentUser.id);
+    } else if (selectedUserFilter && selectedUserFilter !== 'all') {
+      list = list.filter((item) => item.createdByUserId === selectedUserFilter);
     }
     return list.filter((q) => q.isActive).length;
-  }, [qrList, currentUser]);
+  }, [qrList, currentUser, selectedUserFilter]);
 
   const filteredQRs = useMemo(() => {
     let list = qrList;
     if (currentUser && currentUser.role !== 'admin') {
       list = list.filter((item) => item.createdByUserId === currentUser.id);
+    } else if (selectedUserFilter && selectedUserFilter !== 'all') {
+      list = list.filter((item) => item.createdByUserId === selectedUserFilter);
     }
     if (!searchQuery.trim()) return list;
     const q = searchQuery.toLowerCase();
@@ -618,7 +639,7 @@ export default function DashboardPage() {
         item.destinationUrl.toLowerCase().includes(q) ||
         (item.createdByName && item.createdByName.toLowerCase().includes(q))
     );
-  }, [qrList, searchQuery, currentUser]);
+  }, [qrList, searchQuery, currentUser, selectedUserFilter]);
 
   return (
     <div className="dashboard-container">
@@ -732,7 +753,7 @@ export default function DashboardPage() {
           <button
             type="button"
             className="btn-primary"
-            onClick={() => setIsCreateModalOpen(true)}
+            onClick={handleOpenCreateModal}
           >
             <Plus size={18} />
             <span>Create New QR Code</span>
@@ -955,7 +976,7 @@ export default function DashboardPage() {
           <button
             type="button"
             className="btn-primary"
-            onClick={() => setIsCreateModalOpen(true)}
+            onClick={handleOpenCreateModal}
           >
             <Plus size={18} />
             <span>Create First QR Code</span>
@@ -1642,6 +1663,29 @@ export default function DashboardPage() {
                   Updating this URL changes where all past printed QR codes redirect to instantly!
                 </p>
               </div>
+
+              {currentUser?.role === 'admin' && usersList.length > 0 && (
+                <div className="form-group">
+                  <label>Assigned Profile Owner (Admin)</label>
+                  <select
+                    className="form-input"
+                    value={editingQR.createdByUserId || currentUser.id}
+                    onChange={(e) =>
+                      setEditingQR({ ...editingQR, createdByUserId: e.target.value })
+                    }
+                    style={{ cursor: 'pointer' }}
+                  >
+                    {usersList.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name} ({u.username})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="form-help">
+                    Transfer this QR campaign to another sales rep or user profile.
+                  </p>
+                </div>
+              )}
 
               <div className="form-group">
                 <label

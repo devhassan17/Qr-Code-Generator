@@ -15,9 +15,62 @@
       "password": "Rep123!",
       "role": "user",
       "createdAt": "2026-10-14T21:59:08.119Z"
+    },
+    {
+      "id": "usr_1793240117528_0xe1",
+      "username": "amenr",
+      "name": "Amen Ramouni",
+      "password": "Waterford#123",
+      "role": "user",
+      "createdAt": "2026-10-29T02:15:17.528Z"
     }
   ],
   "qrCodes": [
+    {
+      "title": "Gus Saleh Hassan",
+      "slug": "gus-saleh-hassan",
+      "destinationUrl": "https://americanapd.com/specials/gus-saleh-hassan/",
+      "colorDark": "#0f172a",
+      "colorLight": "#ffffff",
+      "notes": "",
+      "isActive": true,
+      "createdByUserId": "usr_admin",
+      "createdByName": "Administrator",
+      "id": "qr_1792513529947_9wwu5",
+      "createdAt": "2026-10-20T16:25:29.947Z",
+      "updatedAt": "2026-10-29T02:16:59.522Z",
+      "totalScans": 5
+    },
+    {
+      "title": "Name",
+      "slug": "name",
+      "destinationUrl": "https://americanapd.com/specials/hassan/",
+      "colorDark": "#0f172a",
+      "colorLight": "#ffffff",
+      "notes": "",
+      "isActive": true,
+      "createdByUserId": "usr_admin",
+      "createdByName": "Administrator",
+      "id": "qr_1792266329659_6gwxl",
+      "createdAt": "2026-10-17T19:45:29.659Z",
+      "updatedAt": "2026-10-17T19:45:29.659Z",
+      "totalScans": 0
+    },
+    {
+      "title": "Testing",
+      "slug": "sales-rep-ali",
+      "destinationUrl": "https://americanapd.com/specials/ali/",
+      "colorDark": "#0f172a",
+      "colorLight": "#ffffff",
+      "notes": "Printed on Papers",
+      "isActive": true,
+      "createdByUserId": "usr_admin",
+      "createdByName": "Administrator",
+      "id": "qr_1792189122678_cmjr3",
+      "createdAt": "2026-10-16T22:18:42.677Z",
+      "updatedAt": "2026-10-29T02:14:06.379Z",
+      "totalScans": 4
+    },
     {
       "title": "Apex Solutions Client Card",
       "slug": "apex-solutions",
@@ -64,5 +117,84 @@
       "createdByName": "Administrator"
     }
   ],
-  "scans": []
+  "scans": [
+    {
+      "qrCodeId": "qr_1792513529947_9wwu5",
+      "slug": "gus-saleh-hassan",
+      "deviceType": "mobile",
+      "os": "iOS",
+      "browser": "Safari",
+      "country": "US",
+      "city": "Detroit",
+      "referer": "Direct / QR Camera Scan",
+      "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0.1 Mobile/15E148 Safari/604.1",
+      "id": "scan_1793240219522_h7jr",
+      "timestamp": "2026-10-29T02:16:59.522Z"
+    },
+    {
+      "qrCodeId": "qr_1792513529947_9wwu5",
+      "slug": "gus-saleh-hassan",
+      "deviceType": "mobile",
+      "os": "iOS",
+      "browser": "Safari",
+      "country": "US",
+      "city": "Detroit",
+      "referer": "Direct / QR Camera Scan",
+      "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0.1 Mobile/15E148 Safari/604.1",
+      "id": "scan_1793240146250_pcbx",
+      "timestamp": "2026-10-29T02:15:46.250Z"
+    },
+    {
+      "qrCodeId": "qr_1792513529947_9wwu5",
+      "slug": "gus-saleh-hassan",
+      "deviceType": "desktop",
+      "os": "Windows",
+      "browser": "Chrome",
+      "country": "US",
+      "city": "Detroit",
+      "referer": "Direct / QR Camera Scan",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+      "id": "scan_1793240131792_hdph",
+      "timestamp": "2026-10-29T02:15:31.792Z"
+    },
+    {
+      "qrCodeId": "qr_1792189122678_cmjr3",
+      "slug": "sales-rep-ali",
+      "deviceType": "mobile",
+      "os": "iOS",
+      "browser": "Safari",
+      "country": "US",
+      "city": "Detroit",
+      "referer": "Direct / QR Camera Scan",
+      "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0.1 Mobile/15E148 Safari/604.1",
+      "id": "scan_1793240046379_8nws",
+      "timestamp": "2026-10-29T02:14:06.379Z"
+    },
+    {
+      "qrCodeId": "qr_1792513529947_9wwu5",
+      "slug": "gus-saleh-hassan",
+      "deviceType": "mobile",
+      "os": "iOS",
+      "browser": "Safari",
+      "country": "PK",
+      "city": "Abbottabad",
+      "referer": "Direct / QR Camera Scan",
+      "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6.1 Mobile/15E148 Safari/604.1",
+      "id": "scan_1792513575946_rwy2",
+      "timestamp": "2026-10-20T16:26:15.946Z"
+    },
+    {
+      "qrCodeId": "qr_1792513529947_9wwu5",
+      "slug": "gus-saleh-hassan",
+      "deviceType": "mobile",
+      "os": "iOS",
+      "browser": "Chrome",
+      "country": "PK",
+      "city": "Lahore",
+      "referer": "Direct / QR Camera Scan",
+      "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7_10 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/155.0.8059.37 Mobile/15E148 Safari/604.1",
+      "id": "scan_1792513568966_ayvn",
+      "timestamp": "2026-10-20T16:26:08.966Z"
+    }
+  ]
 }

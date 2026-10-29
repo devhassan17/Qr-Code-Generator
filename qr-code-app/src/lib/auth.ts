@@ -42,7 +42,11 @@ export function getSessionUserFromRequest(request: NextRequest): SessionUser | n
   return decodeSession(token);
 }
 
-export async function getSessionUser(): Promise<SessionUser | null> {
+export async function getSessionUser(request?: NextRequest): Promise<SessionUser | null> {
+  if (request) {
+    const fromReq = getSessionUserFromRequest(request);
+    if (fromReq) return fromReq;
+  }
   try {
     const cookieStore = cookies();
     const token = cookieStore.get('qr_session_auth')?.value;
