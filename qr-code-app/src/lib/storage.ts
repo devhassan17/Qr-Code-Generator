@@ -7,6 +7,7 @@ export interface DatabaseSchema {
   users: UserProfile[];
   qrCodes: QRCodeItem[];
   scans: ScanEvent[];
+  deletedIds?: string[];
 }
 
 // Global cache in memory for speed
@@ -173,20 +174,35 @@ function mergeDatabaseStates(primary: DatabaseSchema, secondary: DatabaseSchema)
   const qrMap = new Map<string, QRCodeItem>();
   const slugMap = new Map<string, QRCodeItem>();
 
-  // Add primary QR codes
+  // Collect tombstone IDs
+  const deletedSet = new Set<string>();
+  if (Array.isArray(primary.deletedIds)) {
+    primary.deletedIds.forEach((id) => deletedSet.add(id));
+  }
+  if (Array.isArray(secondary.deletedIds)) {
+    secondary.deletedIds.forEach((id) => deletedSet.add(id));
+  }
+
+  // Add primary QR codes (excluding deleted)
   if (Array.isArray(primary.qrCodes)) {
     for (const qr of primary.qrCodes) {
       if (qr && qr.id) {
+        if (deletedSet.has(qr.id) || (qr.slug && deletedSet.has(qr.slug.toLowerCase()))) {
+          continue;
+        }
         qrMap.set(qr.id, qr);
         if (qr.slug) slugMap.set(qr.slug.toLowerCase(), qr);
       }
     }
   }
 
-  // Merge secondary QR codes
+  // Merge secondary QR codes (excluding deleted)
   if (Array.isArray(secondary.qrCodes)) {
     for (const qr of secondary.qrCodes) {
       if (qr && qr.id) {
+        if (deletedSet.has(qr.id) || (qr.slug && deletedSet.has(qr.slug.toLowerCase()))) {
+          continue;
+        }
         if (!qrMap.has(qr.id) && (!qr.slug || !slugMap.has(qr.slug.toLowerCase()))) {
           qrMap.set(qr.id, qr);
           if (qr.slug) slugMap.set(qr.slug.toLowerCase(), qr);
@@ -214,12 +230,12 @@ function mergeDatabaseStates(primary: DatabaseSchema, secondary: DatabaseSchema)
   const scanMap = new Map<string, ScanEvent>();
   if (Array.isArray(primary.scans)) {
     for (const s of primary.scans) {
-      if (s && s.id) scanMap.set(s.id, s);
+      if (s && s.id && !deletedSet.has(s.qrCodeId)) scanMap.set(s.id, s);
     }
   }
   if (Array.isArray(secondary.scans)) {
     for (const s of secondary.scans) {
-      if (s && s.id && !scanMap.has(s.id)) {
+      if (s && s.id && !deletedSet.has(s.qrCodeId) && !scanMap.has(s.id)) {
         scanMap.set(s.id, s);
       }
     }
@@ -234,6 +250,7 @@ function mergeDatabaseStates(primary: DatabaseSchema, secondary: DatabaseSchema)
     users: mergedUsers,
     qrCodes: Array.from(qrMap.values()),
     scans: Array.from(scanMap.values()),
+    deletedIds: Array.from(deletedSet),
   };
 }
 
@@ -468,10 +485,21 @@ export const Storage = {
    */
   async deleteQRCode(id: string): Promise<boolean> {
     const db = await loadDatabase();
-    const qr = db.qrCodes.find((item) => item.id === id);
-    if (qr) {
-      qr.isActive = false;
-      qr.updatedAt = new Date().toISOString();
+    const qrIndex = db.qrCodes.findIndex((item) => item.id === id);
+    if (qrIndex !== -1) {
+      const removed = db.qrCodes.splice(qrIndex, 1)[0];
+      if (!Array.isArray(db.deletedIds)) {
+        db.deletedIds = [];
+      }
+      if (removed.id && !db.deletedIds.includes(removed.id)) {
+        db.deletedIds.push(removed.id);
+      }
+      if (removed.slug && !db.deletedIds.includes(removed.slug.toLowerCase())) {
+        db.deletedIds.push(removed.slug.toLowerCase());
+      }
+      if (Array.isArray(db.scans)) {
+        db.scans = db.scans.filter((s) => s.qrCodeId !== id);
+      }
       await saveDatabase(db);
       return true;
     }
@@ -488,9 +516,18 @@ export const Storage = {
 
     const db = await loadDatabase();
     let hasChanges = false;
+    const deletedList = Array.isArray(db.deletedIds) ? db.deletedIds : [];
 
     for (const cQR of clientQRs) {
       if (!cQR || !cQR.slug) continue;
+      // Do not recreate explicitly deleted campaigns
+      if (
+        deletedList.includes(cQR.id) ||
+        deletedList.includes(cQR.slug.toLowerCase())
+      ) {
+        continue;
+      }
+
       const existing = db.qrCodes.find(
         (q) => q.id === cQR.id || q.slug.toLowerCase() === cQR.slug.toLowerCase()
       );

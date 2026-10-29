@@ -155,5 +155,5 @@ export async function DELETE(
   if (!success) {
     return NextResponse.json({ error: 'QR Code not found' }, { status: 404 });
   }
-  return NextResponse.json({ success: true, message: 'QR Code archived safely' });
+  return NextResponse.json({ success: true, message: 'QR Code permanently deleted' });
 }

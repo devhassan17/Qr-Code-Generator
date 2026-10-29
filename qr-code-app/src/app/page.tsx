@@ -28,7 +28,8 @@ import {
   Upload,
   RefreshCw,
   HardDrive,
-  CheckCircle2
+  CheckCircle2,
+  Trash2
 } from 'lucide-react';
 import { QRCodeItem, QRCodeWithStats, UserProfile } from '@/lib/types';
 import { generateQRDataUrl, generateQRSvg } from '@/lib/qrHelper';
@@ -451,10 +452,63 @@ export default function DashboardPage() {
       });
       if (res.ok) {
         showToast(nextState ? 'Campaign activated!' : 'Campaign paused (Preserved in database).');
-        fetchQRCodes(selectedUserFilter);
+        await fetchQRCodes('all');
       }
     } catch {
       alert('Error toggling campaign status');
+    }
+  };
+
+  const handleDeleteQR = async (qr: QRCodeItem) => {
+    const confirmDelete = window.confirm(
+      `Are you sure you want to permanently delete "${qr.title}" (/r/${qr.slug})?\n\nThis will remove the QR campaign and its scan history. This action cannot be undone.`
+    );
+    if (!confirmDelete) return;
+
+    try {
+      const res = await fetch(`/api/qrcodes/${qr.id}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to delete QR code');
+        return;
+      }
+
+      showToast(`QR Code "${qr.title}" permanently deleted!`);
+
+      // Immediately remove from current state
+      setQrList((prev) => prev.filter((item) => item.id !== qr.id));
+
+      // Remove from client browser vaults so it is never re-synced
+      if (typeof window !== 'undefined') {
+        try {
+          const keysToClean = [
+            'qr_hub_permanent_vault',
+            currentUser ? `qr_hub_vault_${currentUser.id}` : 'qr_hub_vault_session',
+          ];
+          for (const vk of keysToClean) {
+            const raw = localStorage.getItem(vk);
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (Array.isArray(parsed)) {
+                const cleaned = parsed.filter(
+                  (item: QRCodeItem) => item.id !== qr.id && item.slug !== qr.slug
+                );
+                localStorage.setItem(vk, JSON.stringify(cleaned));
+              }
+            }
+          }
+        } catch (e) {}
+      }
+
+      if (isEditModalOpen && editingQR?.id === qr.id) {
+        setIsEditModalOpen(false);
+      }
+
+      await fetchQRCodes('all');
+    } catch (err: any) {
+      alert(err.message || 'Error deleting QR code');
     }
   };
 
@@ -1132,12 +1186,26 @@ export default function DashboardPage() {
                     }}
                     title={
                       qr.isActive
-                        ? 'Pause Campaign (QR code is permanently preserved)'
+                        ? 'Pause Campaign (Preserved in database)'
                         : 'Resume Campaign'
                     }
                     onClick={() => handleToggleActive(qr)}
                   >
                     {qr.isActive ? <PauseCircle size={15} /> : <PlayCircle size={15} />}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn-card-action"
+                    style={{
+                      flex: 'none',
+                      color: '#ef4444',
+                      borderColor: 'rgba(239, 68, 68, 0.25)',
+                    }}
+                    title="Permanently Delete QR Campaign"
+                    onClick={() => handleDeleteQR(qr)}
+                  >
+                    <Trash2 size={15} />
                   </button>
                 </div>
               </article>
@@ -1704,21 +1772,47 @@ export default function DashboardPage() {
               <div
                 style={{
                   display: 'flex',
-                  justifyContent: 'flex-end',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
                   gap: '12px',
                   marginTop: '24px',
                 }}
               >
                 <button
                   type="button"
-                  className="btn-secondary"
-                  onClick={() => setIsEditModalOpen(false)}
+                  style={{
+                    background: 'rgba(239, 68, 68, 0.1)',
+                    border: '1px solid rgba(239, 68, 68, 0.3)',
+                    color: '#f87171',
+                    padding: '8px 14px',
+                    borderRadius: '8px',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    transition: 'all 0.15s ease',
+                  }}
+                  title="Permanently Delete this QR Code"
+                  onClick={() => handleDeleteQR(editingQR)}
                 >
-                  Cancel
+                  <Trash2 size={14} />
+                  <span>Delete QR</span>
                 </button>
-                <button type="submit" className="btn-primary">
-                  <span>Save URL Changes</span>
-                </button>
+
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => setIsEditModalOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn-primary">
+                    <span>Save URL Changes</span>
+                  </button>
+                </div>
               </div>
             </form>
           </div>
